@@ -1,0 +1,40 @@
+
+=== REPRODUCED (cache/eval.csv) ===
+  Per-interface Spearman : 0.445 ± 0.043   <-- paper Fig.3 main metric
+  Per-interface Pearson  : 0.489 ± 0.046
+  Per-interface RMSE     : 1.418 ± 0.125
+  Overall  Spearman      : 0.531
+  Overall  Pearson       : 0.528
+  Overall  RMSE          : 1.728
+  ROC AUC                : 0.733
+
+=== AUTHOR StaB-ddG.csv ===
+  Per-interface Spearman : 0.448 ± 0.039   <-- paper Fig.3 main metric
+  Per-interface Pearson  : 0.490 ± 0.044
+  Per-interface RMSE     : 1.412 ± 0.122
+  Overall  Spearman      : 0.531
+  Overall  Pearson       : 0.532
+  Overall  RMSE          : 1.722
+  ROC AUC                : 0.734
+
+=== FoldX (test split) ===
+  Per-interface Spearman : 0.477 ± 0.034   <-- paper Fig.3 main metric
+  Per-interface Pearson  : 0.495 ± 0.034
+  Per-interface RMSE     : 1.630 ± 0.124
+  Overall  Spearman      : 0.561
+  Overall  Pearson       : 0.541
+  Overall  RMSE          : 1.919
+  ROC AUC                : 0.769
+
+=== Flex ddG (test split) ===
+  Per-interface Spearman : 0.419 ± 0.042   <-- paper Fig.3 main metric
+  Per-interface Pearson  : 0.453 ± 0.044
+  Per-interface RMSE     : 1.933 ± 0.498
+  Overall  Spearman      : 0.537
+  Overall  Pearson       : 0.222
+  Overall  RMSE          : 3.977
+  ROC AUC                : 0.736
+
+=== Sanity: reproduced vs author StaB-ddG ===
+  matched mutations: 1491 / 1491
+  Pearson(reproduced pred, author pred) = 0.9931
