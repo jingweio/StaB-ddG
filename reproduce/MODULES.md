@@ -126,6 +126,7 @@ ProteinMPNN 的随机性来自**随机解码顺序**和**骨架高斯噪声**,�
 ## 5. 评估指标说明(`eval_utils.py: compute_metrics`)
 
 - **Per-interface(per-structure)指标**:对每个复合物分别算 Spearman/Pearson/RMSE,再跨复合物取平均;只统计**突变数 ≥ 10**(`THRESHOLD=10`)的复合物(否则方差太大)。论文主图 Fig.3 报告的就是 **per-interface Spearman**。
+  - **具体到本 SKEMPI 测试集**:81 个复合物中,K=10 过滤后**实际纳入 per-interface 评测的有 43 个**(38 个 <10 突变的界面被排除),覆盖 **1292 / 1491** 条突变。此过滤只取决于测试集本身、与模型无关,故所有模型/权重的 per-interface 都在同样这 43 个界面上计算。
 - **Overall 指标**:把所有突变混在一起算一个相关系数。
 - **标准误**:用 **cluster bootstrap**(对复合物有放回重采样,`BOOTSTRAP=300` 次)估计。
 - **二分类**:ΔΔG<0 视为去稳定突变,算 Precision/Recall/ROC-AUC/PR-AUC。
