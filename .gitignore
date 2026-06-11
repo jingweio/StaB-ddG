@@ -14,5 +14,9 @@ data/SKEMPI2_PDBs/
 AlphaFold_model_PDBs/
 Processed_K50_dG_datasets/
 
+# Run artifacts (kept out of git; curated records live in reproduce/ and ibex_records)
+output/
+
 # 自动导出的对话记录(个人日志,不提交)
 claude_conversation.md
+claude-conversation-records/
