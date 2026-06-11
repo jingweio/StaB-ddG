@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import argparse
 import os
+import datetime
 import wandb
 
 
@@ -80,12 +81,24 @@ def finetune(model, train_dataset, val_dataset, args, lr=1e-5, batch_size=10000,
     ddG_loss_fn = torch.nn.MSELoss()
     # ddG_loss_fn = torch.nn.L1Loss()
 
+    # --- lightweight local training log (CSV), independent of wandb ---
+    os.makedirs(model_save_dir, exist_ok=True)
+    train_log_path = os.path.join(model_save_dir, f"{args.run_name}_train_log.csv")
+    if not os.path.exists(train_log_path):  # never overwrite an existing log
+        with open(train_log_path, 'w') as _lf:
+            _lf.write("timestamp,epoch,lr,train_loss,train_spearman,train_rmse,"
+                      "n_failed_complexes,val_loss,val_per_structure_spearman,"
+                      "val_per_structure_rmse,val_overall_spearman,val_overall_pearson\n")
+    print(f"[train log] per-epoch metrics -> {train_log_path}", flush=True)
+
     for epoch in tqdm(range(n_epochs), desc='Epoch'):
         model.train()
         train_sum = 0
         avg_spearman = 0
         avg_rmse = 0
         train_samples = 0
+        n_failed = 0
+        val_spearman = val_rmse = val_loss = overall_sp = overall_pr = ''
         for sample in train_dataset:
             try:
                 complex, binder1, binder2 = sample['complex'], sample['binder1'], sample['binder2']
@@ -132,6 +145,7 @@ def finetune(model, train_dataset, val_dataset, args, lr=1e-5, batch_size=10000,
                 train_sum += np.mean(complex_loss_sum)
 
             except Exception as e:
+                n_failed += 1
                 print('Failed on complex', sample['complex']['name'])
                 print(e)
         
@@ -158,6 +172,14 @@ def finetune(model, train_dataset, val_dataset, args, lr=1e-5, batch_size=10000,
                     'train_spearman': avg_spearman/len(train_dataset), 
                     'train_rmse': avg_rmse/len(train_dataset)}, step=epoch+1)
             wandb.log({'lr': optimizer.param_groups[0]['lr']}, step=epoch+1)
+
+        # --- append this epoch's metrics to the local CSV log (always) ---
+        _n = max(len(train_dataset), 1)
+        with open(train_log_path, 'a') as _lf:
+            _lf.write(f"{datetime.datetime.now().isoformat(timespec='seconds')},{epoch+1},"
+                      f"{optimizer.param_groups[0]['lr']},"
+                      f"{train_sum/_n:.6f},{avg_spearman/_n:.6f},{avg_rmse/_n:.6f},{n_failed},"
+                      f"{val_loss},{val_spearman},{val_rmse},{overall_sp},{overall_pr}\n")
 
         if args.model_save_freq != -1 and (epoch+1) % args.model_save_freq == 0:
             # if model save directory does not exist, create it
