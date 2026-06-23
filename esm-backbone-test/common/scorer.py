@@ -41,6 +41,18 @@ class SequenceScorer(nn.Module, ABC):
         """Return the wild-type sequence tensor for ``domain`` -> [1, L]."""
         ...
 
+    @property
+    @abstractmethod
+    def backbone_module(self) -> nn.Module:
+        """The trainable backbone ``nn.Module``.
+
+        Finetuning trains ``scorer.backbone_module.parameters()`` and saves
+        ``scorer.backbone_module.state_dict()`` (see ``run/finetune.py``).  This
+        decouples the optimizer/checkpoint from the scorer wrapper so the exact
+        same training loop drives any backbone (ProteinMPNN / ESM-C / ESM3).
+        """
+        ...
+
     def folding_ddG(self, domain, mut_seqs, set_wt_seq=None) -> torch.Tensor:
         """ddG = dG(mutant) - dG(wild-type)."""
         wt = self.get_wt_seq(domain) if set_wt_seq is None else set_wt_seq
@@ -60,6 +72,10 @@ class MPNNScorer(SequenceScorer):
         self.pmpnn = pmpnn
         self.use_antithetic_variates = use_antithetic_variates
         self.noise_level = noise_level
+
+    @property
+    def backbone_module(self):
+        return self.pmpnn
 
     def get_wt_seq(self, domain):
         """Returns the wild type sequence of a protein."""

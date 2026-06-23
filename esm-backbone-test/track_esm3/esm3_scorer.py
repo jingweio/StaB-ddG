@@ -69,6 +69,10 @@ class ESM3Scorer(SequenceScorer):
         self.cb_id = self.seq_tok.get_vocab()["|"]
         self.struct = struct_tokenizer or ESM3StructTokenizer(device, pdb_dir=pdb_dir)
 
+    @property
+    def backbone_module(self):
+        return self.model
+
     def get_wt_seq(self, domain):
         """Return the wild-type sequence as a [1, L] StaB-alphabet int tensor."""
         seq = "".join(c if c in STAB_ALPHABET else "X" for c in domain["seq"])
@@ -129,7 +133,10 @@ class ESM3Scorer(SequenceScorer):
         coords_b = coords.expand(B, -1, -1, -1)       # [B, T, 37, 3]
         plddt_b = plddt.expand(B, -1)                 # [B, T]
 
-        with torch.no_grad(), torch.autocast(
+        # NOTE: no internal ``torch.no_grad()`` here — finetuning needs gradients
+        # to flow through this forward. Eval paths (``run/eval.py``) wrap the
+        # forward in ``torch.no_grad()`` externally, so inference is unaffected.
+        with torch.autocast(
             device_type="cuda", dtype=model_dtype, enabled=use_autocast
         ):
             out = self.model.forward(

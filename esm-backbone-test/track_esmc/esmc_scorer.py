@@ -78,6 +78,10 @@ class ESMCScorer(SequenceScorer):
             )
         self.model.eval()
 
+    @property
+    def backbone_module(self):
+        return self.model
+
     def get_wt_seq(self, domain) -> torch.Tensor:
         """Wild-type sequence as a [1, L] StaB-index long tensor."""
         idx = STAB_ALPHABET.index
@@ -85,7 +89,6 @@ class ESMCScorer(SequenceScorer):
         ids = [idx(c) if c in STAB_ALPHABET else x_id for c in domain["seq"]]
         return torch.tensor(ids, dtype=torch.long).unsqueeze(0)
 
-    @torch.no_grad()
     def folding_dG(self, domain, seqs) -> torch.Tensor:
         """dG = sum_i log P(s_i) over real residues, for each row in ``seqs``.
 
