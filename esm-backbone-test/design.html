@@ -128,6 +128,8 @@
     <tr><td>Stage 1</td><td><b>Megascale 折叠稳定性</b> full-FT(从预训练 ESM 权重初始化)</td><td class="wn"><b>需 AlphaFold PDB</b>(结构)</td><td>序列(从同一批 PDB 解析)</td></tr>
     <tr><td>Stage 2</td><td><b>SKEMPI 结合能</b> full-FT(从 Stage-1 初始化)→ OOD test 评测</td><td colspan="2">SKEMPI splits(已具备)</td></tr>
   </table>
+  <div class="note"><b>为什么 Stage-1 还需要 AlphaFold PDB?</b> Megascale(Tsuboyama et al. 2023)是一个<b>高通量稳定性<i>测量</i>数据集</b> —— 由蛋白酶解实验得到的 <code>(序列, 折叠 ΔΔG)</code> 对,<b>本身不含任何实验结构</b>。但 StaB 的打分是 <code>log P(seq | backbone)</code>,<b>必须有一个 backbone 作为条件</b>;这些 mini-domain 没有实验结构,于是用 <b>AlphaFold 预测的 backbone</b>(<code>AlphaFold_model_PDBs.zip</code>,同一 Zenodo 记录)充当那个固定结构。所以"在 Megascale 上训练" = 在 <code>(AF backbone, WT+突变序列, 实测 ΔΔG)</code> 三元组上训练。<br>
+  → <b class="tA">ESM3 是结构条件模型,同样需要这些 backbone</b>;<b class="tB">ESMC 是纯序列模型,不需要结构</b>(只需序列,直接取自 CSV;表中"从 PDB 解析"只是复用现成管线的便利,非必需)。</div>
   <div class="note"><span class="pill nu">NUANCE</span> 数据细节(已核验):
   <ul>
     <li>Stage-1 <code>stability_finetune.py</code> 默认 <code>--pdb_dir AlphaFold_model_PDBs</code> + <code>Tsuboyama2023…csv</code> + <code>data/rocklin/mega_splits.pkl</code>。<b>AlphaFold_model_PDBs 目录当前不存在,需下载</b>(Plan-D,Zenodo,数十 GB)。</li>
@@ -135,7 +137,32 @@
     <li>per-interface 指标:<code>baselines/eval_utils.py</code> 按 <code>#Pdb</code> 分组,仅纳入<b>突变数 ≥ THRESHOLD=10</b> 的复合物,跨复合物等权平均 Spearman(test 集 43/81 复合物达标)。</li>
   </ul></div>
 
-  <h2>7 · 计算方案与显存账(已核验)</h2>
+  <h2>7 · 超参重调(换骨干后必须重新调参)</h2>
+  <p>原版超参是为<b>小模型 ProteinMPNN</b> 调的,几乎肯定不适合 full-FT 一个 1.4B/6B 的 ESM 模型。原值(已核验):</p>
+  <table>
+    <tr><th>阶段</th><th>lr</th><th>epochs</th><th>batch (token)</th><th>noise_level</th><th>seed</th></tr>
+    <tr><td>Stage-1 Megascale</td><td>1e-6</td><td>70</td><td>10000</td><td>0.1</td><td>0</td></tr>
+    <tr><td>Stage-2 SKEMPI</td><td>1e-6</td><td>200</td><td>10000(复现用 25000)</td><td>0.2</td><td>0</td></tr>
+  </table>
+  <p>1e-6 对 ProteinMPNN(参数极少、本身已是好的 inverse-folding 先验)合适;对大模型 full-FT 通常<b>偏小</b>,且常需 warmup / weight decay / 梯度裁剪。因此做<b>超参扫描</b>,主参数 = 学习率。</p>
+  <h3>扫描网格(每条 track 独立)</h3>
+  <table>
+    <tr><th>超参</th><th>候选值</th><th>说明</th></tr>
+    <tr><td><b>learning rate</b>(主)</td><td><code>{1e-6, 5e-6, 1e-5, 3e-5}</code></td><td>6B full-FT 取低端(防遗忘/不稳定);1.4B 可探到 3e-5</td></tr>
+    <tr><td>warmup</td><td><code>{0, 线性 5% steps}</code></td><td>大模型 full-FT 常需 warmup 稳定早期</td></tr>
+    <tr><td>weight decay</td><td><code>{0, 0.01}</code></td><td>次要</td></tr>
+    <tr><td>noise_level</td><td>ESM3 <code>{0, 0.1}</code>;ESMC N/A</td><td>结构/backbone 噪声(ESMC 无结构)</td></tr>
+    <tr><td>epochs</td><td>按验证集早停</td><td>小数据防过拟合</td></tr>
+  </table>
+  <h3>分层扫描策略(控成本,尤其 6B)</h3>
+  <ul>
+    <li><b>先在便宜的「单阶段 SKEMPI-only」上扫 LR</b>(从预训练直接微调 SKEMPI、跳过 Megascale)—— 数据小、快 —— 为每条 track 选出最优 LR(+warmup)。</li>
+    <li><b>再用胜出超参跑昂贵的完整两阶段</b>(Megascale→SKEMPI)。避免在最贵的 Megascale 阶段盲扫。</li>
+    <li>zero-shot(Stage-0)无超参,先跑取信号。</li>
+  </ul>
+  <div class="warnbox"><span class="pill wn">公平性提示</span> 你已授权<b>直接在 test split 上选超参</b>。这给出的是<b>乐观(oracle 上界)</b>估计 —— 报告 ESM 数字时会明确标注「test-tuned best」。注意 ProteinMPNN 基线 <b>0.445 并未</b>在 test 上调过;为「最优对最优」的公平对照,我会<b>同样对 ProteinMPNN 基线做一次 test-split LR 扫描</b>作为对照行,避免单方面让 ESM 占便宜。</div>
+
+  <h2>8 · 计算方案与显存账(已核验)</h2>
   <div class="grid">
     <div class="card">
       <h3>ESMC-6B full-FT → 必须多卡</h3>
@@ -159,7 +186,7 @@ bf16 梯度        12 GB
   (complex / binder1 / binder2 三个子系统 × {WT, mutant}),每次都要保留激活以反传 —— 激活倍数约 <b>6×</b>(非 3×)。
   <b>MC ensemble(=20)只在推理期</b>,训练期不乘。这进一步加大 6B 的显存压力,坐实分片 + 检查点的必要性。</div>
 
-  <h2>8 · 目录隔离 & 你的三项要求</h2>
+  <h2>9 · 目录隔离 & 你的三项要求</h2>
   <pre><code>esm-backbone-test/
 ├── design.html              # 要求(2):本设计文档
 ├── download_weights.py      # 权重下载(已运行)
@@ -175,7 +202,7 @@ bf16 梯度        12 GB
     <tr><td><b>(3)</b> 用 ibex-usage skill 完成所有计算;结果存到 <code>esm-backbone-test/</code> 而非 <code>ibex-records/</code></td><td>sbatch 脚本仍镜像到 Ibex 执行,但<b>结果/result-md/输出 csv 全部落到 <code>esm-backbone-test/</code></b>(覆盖默认惯例)✅</td></tr>
   </table>
 
-  <h2>9 · 风险(如实标注)</h2>
+  <h2>10 · 风险(如实标注)</h2>
   <ul>
     <li><span class="pill wn">高</span> <b>ESMC-6B FSDP full-FT</b> 是最大风险:6× 前向 × 分片 6B,显存与时长都重;可能需 8× a100 + 梯度检查点,且耗时长。先在极小子集上打通再跑全量。</li>
     <li><span class="pill nu">中</span> <b>AlphaFold PDB 下载</b>(Stage-1,数十 GB,Zenodo)体积/耗时;ESM3 必需,ESMC 仅取序列。</li>
@@ -183,7 +210,7 @@ bf16 梯度        12 GB
     <li><span class="pill nu">低</span> 权重已确认 ungated,无需 HF token(原列为依赖,已排除)。</li>
   </ul>
 
-  <h2>10 · 复现路径(占位,实现阶段细化)</h2>
+  <h2>11 · 复现路径(占位,实现阶段细化)</h2>
   <pre><code># 0. 权重(已完成):python esm-backbone-test/download_weights.py
 # 1. 各 track 实现 SequenceScorer,本地小样本 smoke test
 # 2. Stage-0 zero-shot eval(SKEMPI test) → 立即看信号
@@ -191,7 +218,7 @@ bf16 梯度        12 GB
 #    ESM3: a100:1 ; ESMC-6B: a100:8 + FSDP/ZeRO-3
 # 4. compute per-interface Spearman, 对比 ProteinMPNN 0.445 → 落盘 esm-backbone-test/results/</code></pre>
 
-  <h2>11 · 核验附录(claims × verdict)</h2>
+  <h2>12 · 核验附录(claims × verdict)</h2>
   <p class="sub">5 个 agent 并行对照 <code>StaB-ddG</code> 与 <code>esm</code> 真实代码核验;此处汇总。全部 <span class="pill ok">SUPPORTED</span> 或 <span class="pill nu">NUANCE</span>(已在正文修正),无 refuted。</p>
   <table>
     <tr><th>论断</th><th>判定</th></tr>
