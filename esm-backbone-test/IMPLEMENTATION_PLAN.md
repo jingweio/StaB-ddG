@@ -619,7 +619,11 @@ Generalize the two finetune scripts into one `run/finetune.py` that takes `--bac
 - Create: `esm-backbone-test/run/finetune.py`
 - Test: `esm-backbone-test/tests/test_finetune_smoke.py`
 
-- [ ] **Step 1: Write `finetune.py`** — port the `skempi_finetune.py:89-136` inner loop (per-chunk `MSELoss`, `Adam(lr)`, `backward/step/zero_grad`) and the `stability_finetune.py` loop, parameterized by stage. Save backbone weights each epoch: `torch.save(scorer.model.state_dict(), f"{out}/{run}_{epoch+1}.pt")` to `track_{esm3,esmc}/ckpts/`. Add an `--lr`, `--epochs`, `--batch_size` (token budget), `--warmup`, `--weight_decay` so the sweep can drive it. ⚠️ For ESM3, enable the batched-structure optimization noted in Task 5.
+- [ ] **Step 1: Write `finetune.py`** — port the `skempi_finetune.py:89-136` inner loop (per-chunk `MSELoss`, `Adam(lr)`, `backward/step/zero_grad`) and the `stability_finetune.py` loop, parameterized by stage. Save backbone weights each epoch: `torch.save(scorer.backbone_module.state_dict(), f"{out}/{run}_{epoch+1}.pt")` to `track_{esm3,esmc}/ckpts/` (add a `backbone_module` property on `SequenceScorer` returning the trainable `nn.Module` — `pmpnn` for MPNN, `model` for ESM). Add `--lr, --epochs, --batch_size (token budget), --warmup, --weight_decay`.
+  - ⚠️ **Scorer batching is DONE (T6.5)** — `folding_dG` does one forward over `[B,L]`.
+  - ⚠️ **ESM3 memory is O(B·L²)** (geometric attention): set the token-budget `--batch_size` LOW for ESM3 so `B = batch_size // L ≈ 8–16` at L~460 (even lower for ~583-res complexes). On a100-80GB you get more room than the local A4500 but L² still bounds B. ESMC has no such L² blowup.
+  - ⚠️ **Device order:** launch with `CUDA_DEVICE_ORDER=PCI_BUS_ID` (the A4500 is CUDA index 0 locally, not nvidia-smi's index 1). The project standard already sets this.
+  - 💡 Optional perf: the WT dG is identical for all mutants of a domain; caching it per domain (instead of recomputing per chunk) ~halves ESM3 forwards. Add only if eval/finetune throughput needs it.
 
 - [ ] **Step 2: Smoke test** — 2 optimizer steps on the fixture complex reduce the loss (no NaN), for `esm3` and `esmc_600m`:
 ```python
