@@ -79,6 +79,15 @@ class ESM3Scorer(SequenceScorer):
     def folding_dG(self, domain, seqs):
         """Predict dG = sum_i log P(s_i | fixed structure) for each sequence row."""
         st, coords, plddt = self.struct.tokens_for(domain)  # FIXED structure [1,T]
+        # On GPU the ESM3 model params are bfloat16, but ESM3.forward internally
+        # forces ``average_plddt``/``per_res_plddt`` to float32 (esm3.py:334-335),
+        # so its float32 plddt feeds a bf16 ``plddt_projection`` Linear and a CPU
+        # test never exercises this path.  Run the forward under autocast so the
+        # bf16 Linear layers accept the float32 plddt/coord-derived inputs
+        # ("mat1 and mat2 must have the same dtype" otherwise).  On CPU the model
+        # is already float32 and autocast is a no-op (disabled).
+        model_dtype = next(self.model.parameters()).dtype
+        use_autocast = self.device != "cpu" and model_dtype != torch.float32
         lens = chain_lengths(domain)
         dGs = []
         for row in seqs:
@@ -97,7 +106,9 @@ class ESM3Scorer(SequenceScorer):
                 f"(domain {domain.get('name')!r}, chain_lengths={lens}). "
                 "Check chain-break reconciliation (lengths AND ordering)."
             )
-            with torch.no_grad():
+            with torch.no_grad(), torch.autocast(
+                device_type="cuda", dtype=model_dtype, enabled=use_autocast
+            ):
                 out = self.model.forward(
                     sequence_tokens=seq_tokens,
                     structure_tokens=st,
