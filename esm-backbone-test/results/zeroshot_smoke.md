@@ -85,3 +85,27 @@ confirming CPU behavior is unchanged.
 is exactly `,#Pdb,Mutation,ddG,ddG_pred`, that re-reading yields the
 `Unnamed: 0` index column, that `ddG_pred` equals the raw `Prediction` (no x-1),
 and the returned DataFrame columns are `#Pdb, Mutation, ddG, ddG_pred`.
+
+## Perf: batched `folding_dG` (single forward over [B,L])
+`ESMCScorer.folding_dG` and `ESM3Scorer.folding_dG` now stack all B rows into a
+single `[B,T]` batch and run ONE forward (no padding / no attention mask — every
+row shares the WT length L because mutations are substitutions). For ESM3 the
+fixed structure tensors are broadcast across the batch (`st.expand(B,-1)`,
+`coords.expand(B,-1,-1,-1)`, `plddt.expand(B,-1)`). Correctness gate: CPU fp32
+`test_esm3_batch_consistency` (batched == per-row, atol 1e-3) passes, as does the
+existing ESMC `test_batch_consistency`.
+
+ESM3 GPU timing (NVIDIA RTX A4500 21 GB, CUDA index 0; binder1 = 1A4Y_A,
+L=460, bf16 autocast):
+- OLD per-row loop, 16 rows: **1.30 s**  (≈ 0.081 s/row × 16; 41 rows ≈ 3.3 s).
+- NEW one batched forward, B=16: **0.91 s**  → **~1.43× faster** at this L.
+- The speedup is modest (not 10×) because the geometric-attention distance term
+  is O(B·L²): the transformer forward is compute-bound and ~linear in B, so
+  batching mainly removes per-row Python/launch overhead and redundant struct
+  lookups. At L=460 the batch OOMs the 21 GB A4500 for B≥24 (B=41 tried to
+  allocate 25 GiB for `(query_dist-key_dist).norm`); peak mem was 6.9/11.0/19.0
+  GB for B=4/8/16. The caller chunks by a token budget (`M = batch_size // L`),
+  so for large L the caller must keep the per-call B small (B≈16 fits at L=460).
+- GPU bf16 batched-vs-per-row differs by ~0.5 on a ~465-magnitude dG (≈0.1%,
+  pure bf16 matmul-reduction-order noise); the authoritative correctness check is
+  the CPU fp32 batch-consistency test at atol 1e-3, which passes.

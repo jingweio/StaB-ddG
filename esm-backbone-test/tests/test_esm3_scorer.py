@@ -91,3 +91,16 @@ def test_mutation_changes_dG():
     mut[0, 5] = (mut[0, 5] + 1) % 20
     d = sc.folding_ddG(dom, mut)
     assert d.shape == (1,) and torch.isfinite(d).all() and d.abs().item() > 1e-4
+
+
+def test_esm3_batch_consistency():
+    """Batched folding_dG must equal per-sequence results (catches struct-repeat/gather bugs)."""
+    sc = ESM3Scorer(device="cpu", pdb_dir=PDB_DIR)
+    dom = _load()["binder1"]
+    s1 = sc.get_wt_seq(dom)
+    s2 = s1.clone()
+    s2[0, 3] = (s2[0, 3] + 1) % 20
+    batch = torch.cat([s1, s2], 0)  # [2, L]
+    dG_batch = sc.folding_dG(dom, batch)  # [2]
+    dG_each = torch.cat([sc.folding_dG(dom, s1), sc.folding_dG(dom, s2)])
+    assert torch.allclose(dG_batch, dG_each, atol=1e-3), (dG_batch, dG_each)

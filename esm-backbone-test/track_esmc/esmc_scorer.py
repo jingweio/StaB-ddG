@@ -13,11 +13,11 @@ The scorer is sequence-only: ``folding_dG`` ignores backbone structure entirely
 and depends only on the amino-acid identities and the per-chain lengths of the
 domain (used to place chain-breaks).
 
-Correctness note (padding): sequences are scored one at a time (B=1, no
-padding). This is provably free of the pad-attention corruption that would
-arise from padding a batch without supplying a validity mask to ESM-C. The
-per-row loop is the bottleneck for large batches; this can later be swapped for
-a masked batched forward (passing a bool ``sequence_id`` mask) if needed.
+Correctness note (padding): every row of a ``folding_dG`` batch shares the same
+length L (mutations are substitutions, never indels), so all rows tokenize to
+the SAME length T. The whole [B, L] input is therefore stacked into [B, T] and
+run through ONE forward with NO padding and NO attention mask — provably free of
+the pad-attention corruption a padded batch would suffer.
 """
 
 import torch
@@ -89,32 +89,44 @@ class ESMCScorer(SequenceScorer):
     def folding_dG(self, domain, seqs) -> torch.Tensor:
         """dG = sum_i log P(s_i) over real residues, for each row in ``seqs``.
 
-        Returns a [B] tensor. Scores one sequence at a time (no padding).
+        Returns a [B] tensor. Every row in ``seqs`` has the same length L
+        (mutations are substitutions, never indels), so all rows tokenize to the
+        SAME length T and the SAME chain-break layout. We can therefore stack
+        into a [B, T] batch and run ONE forward with NO padding and NO attention
+        mask — provably free of the pad-attention corruption a padded batch
+        would suffer.
         """
         self._cur_lengths = chain_lengths(domain)
         model_device = next(self.model.parameters()).device
 
-        dGs = []
-        for row in seqs:
-            aa = insert_chainbreaks(int_seq_to_str(row), self._cur_lengths)
-            tokens = encoding.tokenize_sequence(
-                aa, self.tokenizer, add_special_tokens=True
-            ).to(model_device)
-            tokens = tokens.unsqueeze(0)  # [1, T]
+        # Tokenize every row; all rows share L -> all share T (asserted below).
+        rows = [
+            encoding.tokenize_sequence(
+                insert_chainbreaks(int_seq_to_str(row), self._cur_lengths),
+                self.tokenizer,
+                add_special_tokens=True,
+            )
+            for row in seqs
+        ]
+        T = rows[0].shape[0]
+        assert all(r.shape[0] == T for r in rows), (
+            "all rows must tokenize to the same length T (substitutions only); "
+            f"got lengths {[int(r.shape[0]) for r in rows]}"
+        )
+        tokens = torch.stack(rows, dim=0).to(model_device)  # [B, T]
 
-            out = self.model(sequence_tokens=tokens)
-            logits = out.sequence_logits.float()  # [1, T, V]
-            log_probs = torch.log_softmax(logits, dim=-1)  # [1, T, V]
+        out = self.model(sequence_tokens=tokens)
+        logits = out.sequence_logits.float()  # [B, T, V]
+        log_probs = torch.log_softmax(logits, dim=-1)  # [B, T, V]
 
-            tok = tokens[0]  # [T]
-            tok_lp = log_probs[0, torch.arange(tok.shape[0], device=model_device), tok]
+        # Per-position log-prob of the actual token: gather over the vocab dim.
+        tok_lp = log_probs.gather(-1, tokens.unsqueeze(-1)).squeeze(-1)  # [B, T]
 
-            # Mask out special tokens (cls / eos / pad / '|') from the sum.
-            keep = torch.ones_like(tok, dtype=torch.bool)
-            for sid in self._special_ids:
-                if sid is not None:
-                    keep &= tok != sid
+        # Mask out special tokens (cls / eos / pad / '|') from the sum, per row.
+        keep = torch.ones_like(tokens, dtype=torch.bool)  # [B, T]
+        for sid in self._special_ids:
+            if sid is not None:
+                keep &= tokens != sid
 
-            dGs.append(tok_lp[keep].sum())
-
-        return torch.stack(dGs).to(self.device)
+        dGs = (tok_lp * keep).sum(dim=-1)  # [B]
+        return dGs.to(self.device)

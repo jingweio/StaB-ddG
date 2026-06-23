@@ -77,7 +77,14 @@ class ESM3Scorer(SequenceScorer):
         )
 
     def folding_dG(self, domain, seqs):
-        """Predict dG = sum_i log P(s_i | fixed structure) for each sequence row."""
+        """Predict dG = sum_i log P(s_i | fixed structure) for each sequence row.
+
+        The structure ``(st, coords, plddt)`` is FIXED per domain and every row
+        of ``seqs`` shares the same length L (substitutions only, no indels), so
+        all rows tokenize to the SAME length T == ``st.shape[1]``. We therefore
+        stack the B rows into [B, T], broadcast the fixed structure across the
+        batch, and run ONE forward — no padding, no attention mask.
+        """
         st, coords, plddt = self.struct.tokens_for(domain)  # FIXED structure [1,T]
         # On GPU the ESM3 model params are bfloat16, but ESM3.forward internally
         # forces ``average_plddt``/``per_res_plddt`` to float32 (esm3.py:334-335),
@@ -89,39 +96,54 @@ class ESM3Scorer(SequenceScorer):
         model_dtype = next(self.model.parameters()).dtype
         use_autocast = self.device != "cpu" and model_dtype != torch.float32
         lens = chain_lengths(domain)
-        dGs = []
-        for row in seqs:
-            aa = insert_chainbreaks(int_seq_to_str(row), lens)
-            seq_tokens = (
-                tokenize_sequence(aa, self.seq_tok, add_special_tokens=True)
-                .to(self.device)
-                .unsqueeze(0)
+
+        # Tokenize every row; all rows share L -> all share T (asserted below).
+        rows = [
+            tokenize_sequence(
+                insert_chainbreaks(int_seq_to_str(row), lens),
+                self.seq_tok,
+                add_special_tokens=True,
             )
-            # CRITICAL: sequence and structure token lengths must match, with the
-            # '|' (seq chainbreak) positions aligned to the structure CHAINBREAK
-            # positions.  Fail loudly instead of scoring a misaligned pair.
-            assert seq_tokens.shape[1] == st.shape[1], (
-                "sequence/structure length mismatch: seq_tokens "
-                f"{tuple(seq_tokens.shape)} vs structure {tuple(st.shape)} "
-                f"(domain {domain.get('name')!r}, chain_lengths={lens}). "
-                "Check chain-break reconciliation (lengths AND ordering)."
+            for row in seqs
+        ]
+        T = rows[0].shape[0]
+        assert all(r.shape[0] == T for r in rows), (
+            "all rows must tokenize to the same length T (substitutions only); "
+            f"got lengths {[int(r.shape[0]) for r in rows]}"
+        )
+        seq_tokens = torch.stack(rows, dim=0).to(self.device)  # [B, T]
+        B = seq_tokens.shape[0]
+
+        # CRITICAL: sequence and structure token lengths must match, with the
+        # '|' (seq chainbreak) positions aligned to the structure CHAINBREAK
+        # positions.  Fail loudly instead of scoring a misaligned pair.
+        assert seq_tokens.shape[1] == st.shape[1], (
+            "sequence/structure length mismatch: seq_tokens "
+            f"{tuple(seq_tokens.shape)} vs structure {tuple(st.shape)} "
+            f"(domain {domain.get('name')!r}, chain_lengths={lens}). "
+            "Check chain-break reconciliation (lengths AND ordering)."
+        )
+
+        # Broadcast the FIXED structure across the B sequence rows.
+        st_b = st.expand(B, -1)                       # [B, T]
+        coords_b = coords.expand(B, -1, -1, -1)       # [B, T, 37, 3]
+        plddt_b = plddt.expand(B, -1)                 # [B, T]
+
+        with torch.no_grad(), torch.autocast(
+            device_type="cuda", dtype=model_dtype, enabled=use_autocast
+        ):
+            out = self.model.forward(
+                sequence_tokens=seq_tokens,
+                structure_tokens=st_b,
+                structure_coords=coords_b,
+                per_res_plddt=plddt_b,
             )
-            with torch.no_grad(), torch.autocast(
-                device_type="cuda", dtype=model_dtype, enabled=use_autocast
-            ):
-                out = self.model.forward(
-                    sequence_tokens=seq_tokens,
-                    structure_tokens=st,
-                    structure_coords=coords,
-                    per_res_plddt=plddt,
-                )
-            logp = torch.log_softmax(out.sequence_logits.float(), dim=-1)[0]  # [T,64]
-            tgt = seq_tokens[0]
-            g = logp.gather(-1, tgt.unsqueeze(-1)).squeeze(-1)
-            valid = ~(
-                (tgt == self.seq_tok.cls_token_id)
-                | (tgt == self.seq_tok.eos_token_id)
-                | (tgt == self.cb_id)
-            )
-            dGs.append(g[valid].sum())
-        return torch.stack(dGs).to(self.device)
+        logp = torch.log_softmax(out.sequence_logits.float(), dim=-1)  # [B, T, 64]
+        g = logp.gather(-1, seq_tokens.unsqueeze(-1)).squeeze(-1)  # [B, T]
+        valid = ~(
+            (seq_tokens == self.seq_tok.cls_token_id)
+            | (seq_tokens == self.seq_tok.eos_token_id)
+            | (seq_tokens == self.cb_id)
+        )  # [B, T]
+        dGs = (g * valid).sum(dim=-1)  # [B]
+        return dGs.to(self.device)
