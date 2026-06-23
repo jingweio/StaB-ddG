@@ -7,3 +7,6 @@ wandb/
 *cache*
 data/SKEMPI2_PDBs/
 data/SKEMPI2_PDBs
+AlphaFold_model_PDBs/
+Processed_K50_dG_datasets/
+data/*.zip
