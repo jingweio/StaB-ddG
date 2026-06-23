@@ -314,8 +314,11 @@ def test_all_21_map_to_esm_vocab():
 ## Task 3: `ESMCScorer` (Track B, sequence-only)
 
 **Files:**
+- Create: `esm-backbone-test/common/hf_compat.py` (the `load_torch_model` `.pth` fallback patch, moved OUT of `conftest.py` so it applies in production scripts too — ESMC-600M weights are `.pth` under `data/weights/`; ESMC-6B is native safetensors and needs no patch)
 - Create: `esm-backbone-test/track_esmc/esmc_scorer.py`
 - Test: `esm-backbone-test/tests/test_esmc_scorer.py`
+
+- [ ] **Step 0: Move the patch to `common/hf_compat.py`** — lift the `_patched_load_torch_model` from `conftest.py` into `common/hf_compat.py` as an idempotent `apply()` called at import of `esmc_scorer.py` (and have `conftest.py` import it instead of defining its own). This makes 600M loadable from `finetune.py`/`eval.py` which run outside pytest.
 
 - [ ] **Step 1: Write the scorer** (uses the verified ESMC summed-dG snippet; batched raw forward; '|' chain breaks; bf16→float)
 
@@ -428,8 +431,9 @@ STRUCT_BOS, STRUCT_EOS, STRUCT_MASK = 4098, 4097, 4096
 
 class ESM3StructTokenizer:
     def __init__(self, device="cuda"):
+        import torch
         self.device = device
-        self.encoder = ESM3_structure_encoder_v0(device).eval()
+        self.encoder = ESM3_structure_encoder_v0(device).to(torch.float32).eval()  # keep VQ-VAE fp32
         self._cache = {}      # domain['name'] -> (structure_tokens[1,T], coords[1,T,37,3], plddt[1,T])
 
     def _domain_to_chain(self, domain):
@@ -482,7 +486,7 @@ def test_struct_tokens_shape_and_specials():
     st2,_,_ = tk.tokens_for(dom); assert st2 is st     # cached
 ```
 
-- [ ] **Step 3: Run** — `pytest esm-backbone-test/tests/test_esm3_struct.py -v` → Expected: PASS. ⚠️ If `from_atom37` rejects NaN-only side-chain atoms, fall back to `ProteinChain.from_pdb(<written binder pdb>, chain_id="all")` (the binder PDBs already exist via `extract_chains`).
+- [ ] **Step 3: Run** — `pytest esm-backbone-test/tests/test_esm3_struct.py -v` → Expected: PASS. ⚠️ **VERIFIED end-to-end**: `ProteinChain.from_pdb(<pdb>, chain_id="all")` → `to_structure_encoder_inputs()` → `encoder.encode(coords, residue_index=...)` → forward gave **81% sequence recovery** on the bundled `1utn.pdb`. **Prefer `from_pdb` on the on-disk PDB** (complex/binder PDBs already exist via `extract_chains` at `{pdb_dir}/{domain['name']}.pdb`) over reconstructing `from_atom37` from the domain coords dict; use `from_atom37` only when no PDB path is available. The encoder runs in **float32**.
 
 - [ ] **Step 4: Commit** — `git add esm-backbone-test/track_esm3/esm3_struct.py esm-backbone-test/tests/test_esm3_struct.py && git commit -m "feat: ESM3 structure tokenizer + per-domain cache"`
 
@@ -510,7 +514,12 @@ from esm_backbone_test.track_esm3.esm3_struct import ESM3StructTokenizer
 class ESM3Scorer(SequenceScorer):
     def __init__(self, device="cuda", model=None, struct_tokenizer=None):
         super().__init__(device)
-        self.model = model or ESM3_sm_open_v0(device)
+        # ⚠️ VERIFIED: the esm3 checkpoint has MIXED bf16/float params; loading via
+        # assign=True keeps those dtypes and a forward then fails with
+        # "mat1 and mat2 must have the same dtype". Cast to a uniform dtype:
+        # float32 on CPU (tests), bfloat16 on GPU (matches from_pretrained).
+        dtype = torch.float32 if str(device) == "cpu" else torch.bfloat16
+        self.model = (model or ESM3_sm_open_v0(device)).to(dtype).eval()
         self.seq_tok = self.model.tokenizers.sequence
         self.cb_id = self.seq_tok.get_vocab()["|"]
         self.struct = struct_tokenizer or ESM3StructTokenizer(device)
