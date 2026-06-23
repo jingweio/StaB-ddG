@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StaB-ddG · ESM-backbone swap — 改造设计文档</title>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#161b22; --panel2:#1c232c; --ink:#e6edf3; --muted:#9aa7b4;
+    --line:#2a323c; --accent:#4ea1ff; --a3:#7ee787; --b:#ffa657; --warn:#ff7b72;
+    --ok:#3fb950; --nuance:#d29922;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue","PingFang SC","Microsoft YaHei",sans-serif;}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 28px 90px}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:.3px}
+  h2{font-size:21px;margin:42px 0 12px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+  h3{font-size:16px;margin:24px 0 8px;color:var(--accent)}
+  p{margin:9px 0}
+  code{background:#0b0e12;border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SFMono-Regular",Consolas,monospace;font-size:13px;color:#d2e3f7}
+  pre{background:#0b0e12;border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow:auto;font-size:13px;line-height:1.5}
+  pre code{border:0;background:none;padding:0}
+  .sub{color:var(--muted);font-size:13.5px}
+  .badges{margin:14px 0 4px}
+  .badge{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:999px;
+    padding:3px 11px;margin:3px 6px 3px 0;font-size:12.5px;color:var(--muted)}
+  .badge b{color:var(--ink)}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--ink)}
+  tr:nth-child(even) td{background:#12171d}
+  .tA{color:var(--a3);font-weight:600}
+  .tB{color:var(--b);font-weight:600}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  .pill{display:inline-block;font-size:11px;font-weight:700;border-radius:5px;padding:1px 7px;margin-right:6px}
+  .ok{background:rgba(63,185,80,.15);color:var(--ok);border:1px solid rgba(63,185,80,.4)}
+  .nu{background:rgba(210,153,34,.15);color:var(--nuance);border:1px solid rgba(210,153,34,.4)}
+  .wn{background:rgba(255,123,114,.13);color:var(--warn);border:1px solid rgba(255,123,114,.4)}
+  .muted{color:var(--muted)}
+  .kbd{font-family:monospace;font-size:12.5px;color:#9fd0ff}
+  ul{margin:8px 0 8px 0;padding-left:22px}
+  li{margin:5px 0}
+  .note{border-left:3px solid var(--accent);background:#11181f;padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+  .warnbox{border-left:3px solid var(--warn);background:#1a1414;padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+  .eq{background:#0b0e12;border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:10px 0;font-family:monospace;font-size:13.5px;color:#cfe6ff}
+  footer{margin-top:50px;color:var(--muted);font-size:12.5px;border-top:1px solid var(--line);padding-top:14px}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>StaB-ddG · 把 ProteinMPNN 换成 ESM backbone</h1>
+  <div class="sub">改造设计文档 (design spec) — PPI 突变效应预测 (ΔΔG<sub>bind</sub>) · 两条并行实验线</div>
+  <div class="badges">
+    <span class="badge">日期 <b>2026-06-23</b></span>
+    <span class="badge">StaB-ddG 分支 <b>esm-replace</b></span>
+    <span class="badge">esm 仓库分支 <b>reproduce</b></span>
+    <span class="badge">ProteinMPNN 基线 per-interface Spearman <b>0.445</b></span>
+    <span class="badge">计算 <b>KAUST Ibex (a100)</b></span>
+  </div>
+  <div class="note">
+    本文档中的每一条技术论断都已用 <b>5 个并行 agent 对照真实代码做过对抗式核验</b>(见文末「核验附录」);
+    被标 <span class="pill nu">NUANCE</span> 的点已在正文按代码事实修正。
+  </div>
+
+  <h2>1 · 目标与假设</h2>
+  <p>StaB-ddG 完全建立在 <b>ProteinMPNN</b> 之上。本实验把这个"打分骨干"替换掉,走完 StaB-ddG 的<b>两阶段训练 + 推理</b>全流程,检验:
+  <b>用现代 ESM 模型替换 ProteinMPNN,能否在 PPI 突变效应预测上带来提升?</b>(以论文头号指标 per-interface Spearman 为准,ProteinMPNN 复现基线 = <b>0.445</b>。)</p>
+
+  <h2>2 · StaB-ddG 只用到一个"原语"</h2>
+  <p>StaB-ddG 对 ProteinMPNN 的唯一调用是 <code>stabddg/model.py: folding_dG</code>——
+  给定<b>固定 backbone 结构 X</b> 与序列 S,返回每残基对数概率并求和,得到<b>结构条件下的序列对数似然</b>:</p>
+  <div class="eq">dG(domain, seq) = Σ<sub>i</sub> &nbsp;onehot(seq)<sub>i</sub> · log_softmax(pmpnn(X, S, …))<sub>i</sub></div>
+  <p>其余全部建立在这一个标量之上(已核验 <span class="pill ok">SUPPORTED</span>):</p>
+  <div class="eq">
+    folding_ddG = dG(mut) − dG(wt)&nbsp;&nbsp;<span class="muted"># wt/mut 共享同一组 decoding_order + backbone_noise(antithetic 方差缩减)</span><br>
+    binding_ddG = complex_ddG − ( binder1_ddG + binder2_ddG )<br>
+    最终预测 = mean<sub>20</sub>( binding_ddG ) × (−1)&nbsp;&nbsp;<span class="muted"># MC ensemble=20,负值=稳定化(仅推理期)</span>
+  </div>
+  <div class="note"><span class="pill nu">NUANCE</span> <code>StaBddG</code> 类本身<b>不引入任何可训练参数</b>,ProteinMPNN 是唯一的学习型打分器;
+  (同文件里另有一个<b>未被使用</b>的 <code>LinearModel</code>,推理路径不经过它。)<br>
+  <b>替换工作的本质:只重写 <code>dG(domain, seq)</code> 这一个函数,StaB 的恒等式与方差缩减原样保留。</b></div>
+
+  <h2>3 · 为什么不能"字面替换成 ESMFold2"</h2>
+  <p>仓库 <code>/home/guoj0f/repos/esm</code> 是 EvolutionaryScale <code>esm</code> v3.3.0(含 ESMC / ESMFold2 / ESM3)。三者能力已核验:</p>
+  <table>
+    <tr><th>模型</th><th>做什么</th><th>能给 <code>log P(seq | 结构)</code> 吗?</th><th>能否顶替 StaB 原语</th></tr>
+    <tr><td><b>ESMFold2</b>(基于 ESMC 6B)</td><td>正向折叠 seq→3D(扩散,默认 200 步,<code>.fold()</code>)</td><td class="wn">❌ 代码未暴露任何"给定结构给序列打分"的接口<span class="muted"> (README 提到 "inversion of ESMFold2" 用于 binder 设计,但本代码库未封装成 seq-likelihood API)</span></td><td>不能直接用</td></tr>
+    <tr><td><b>ESMC</b> 300M/600M/<b>6B</b></td><td>纯序列语言模型,<code>.logits()→sequence_logits</code></td><td class="nuance">⚠️ 只有 <code>log P(seq)</code>,<b>无结构</b></td><td>可(序列似然变体)</td></tr>
+    <tr><td><b>ESM3</b>(<code>ESM3_sm_open</code>)</td><td>多模态:<code>forward(sequence_tokens, structure_tokens, …)→sequence_logits</code></td><td class="tA">✅ <b>是 — 结构条件序列似然</b>,ProteinMPNN 的真正功能对应物</td><td>可(最忠实)</td></tr>
+  </table>
+  <p>结论:ESMFold2 是<b>正向折叠</b>模型,塞不进 StaB 的打分循环。因此选定<b>两条线</b>——
+  <span class="tA">ESM3(保留结构条件,最忠实)</span> 与 <span class="tB">ESMC-6B(纯序列,最强语言骨干)</span>。</p>
+
+  <h2>4 · 两条并行实验线(严格隔离,绝不混淆)</h2>
+  <table>
+    <tr><th></th><th class="tA">Track A — ESM3-1.4B</th><th class="tB">Track B — ESMC-6B</th></tr>
+    <tr><td><code>log P(s<sub>i</sub>|·)</code> 条件</td><td><b>结构 token</b>(PDB 经 VQ-VAE 编码)+ 序列</td><td><b>仅序列</b></td></tr>
+    <tr><td>忠于 StaB "由结构算折叠能"?</td><td class="tA">✅ 是(真 inverse-folding 对应物)</td><td class="tB">✗ 序列似然变体</td></tr>
+    <tr><td>每个 PDB 的预处理</td><td>结构 tokenize 一次 → 缓存</td><td>无</td></tr>
+    <tr><td>方差缩减</td><td>对序列轨道 mask 做 ensemble</td><td>单次前向,无需</td></tr>
+    <tr><td>微调方式</td><td>full-FT,<b>单卡 a100-80GB</b> + 梯度检查点</td><td>full-FT,<b>多卡 FSDP/ZeRO-3</b>(4–8× a100)</td></tr>
+    <tr><td>规模 (已核验)</td><td>d=1536, heads=24, layers=48 ≈ <b>1.4B</b></td><td>d=2560, heads=40, layers=80 ≈ <b>6.3B</b></td></tr>
+    <tr><td>权重 (已下载,ungated)</td><td><code>biohub/esm3-sm-open-v1</code> ~5.5GB</td><td><code>biohub/esmc-6b-2024-12</code> ~25GB</td></tr>
+  </table>
+  <p class="muted">ESMC-6B 是 ESMC-600M 的 ~11×(参数 ∝ layers×d²:(80/36)×(2560/1152)² ≈ 11)。600M 权重也已下载,作快速迭代/兜底。</p>
+
+  <h2>5 · 核心重构:<code>SequenceScorer</code> 抽象接口</h2>
+  <p>把 <code>StaBddG</code>、<code>stability_finetune.py</code>、<code>skempi_finetune.py</code>、<code>skempi_eval.py</code> 改成<b>骨干无关</b>:抽出统一接口</p>
+  <pre><code>class SequenceScorer(nn.Module):
+    def dG(self, domain, seqs) -> Tensor:   # [B] 结构/序列条件下的序列对数似然
+        ...
+# 三个实现,彼此隔离:
+#   MPNNScorer  (现有 ProteinMPNN, 基线)
+#   ESM3Scorer  (Track A: 结构 token + 序列 → sequence_logits)
+#   ESMCScorer  (Track B: 序列 → sequence_logits)</code></pre>
+  <p>StaB 的 <code>folding_ddG / binding_ddG / ensemble / 符号</code> 逻辑完全复用,只换 <code>dG()</code> 的实现。
+  ESMC-6B 另需一套 <b>FSDP 训练 harness</b>(StaB-ddG 原仓库没有分布式训练)。</p>
+
+  <h2>6 · 两阶段训练(忠于原文)</h2>
+  <table>
+    <tr><th>阶段</th><th>内容</th><th>Track A (ESM3) 数据</th><th>Track B (ESMC) 数据</th></tr>
+    <tr><td>Stage 0</td><td><b>zero-shot</b> 在 SKEMPI test 上评测(去风险,几乎免费)</td><td colspan="2">无需训练</td></tr>
+    <tr><td>Stage 1</td><td><b>Megascale 折叠稳定性</b> full-FT(从预训练 ESM 权重初始化)</td><td class="wn"><b>需 AlphaFold PDB</b>(结构)</td><td>序列(从同一批 PDB 解析)</td></tr>
+    <tr><td>Stage 2</td><td><b>SKEMPI 结合能</b> full-FT(从 Stage-1 初始化)→ OOD test 评测</td><td colspan="2">SKEMPI splits(已具备)</td></tr>
+  </table>
+  <div class="note"><span class="pill nu">NUANCE</span> 数据细节(已核验):
+  <ul>
+    <li>Stage-1 <code>stability_finetune.py</code> 默认 <code>--pdb_dir AlphaFold_model_PDBs</code> + <code>Tsuboyama2023…csv</code> + <code>data/rocklin/mega_splits.pkl</code>。<b>AlphaFold_model_PDBs 目录当前不存在,需下载</b>(Plan-D,Zenodo,数十 GB)。</li>
+    <li>Stage-2 <code>skempi_finetune.py</code> 默认训练划分是 <code>data/SKEMPI/train_clusters.pkl</code>(44 个同源簇);<code>train_pdb.pkl</code>(120 复合物)/ <code>test_pdb.pkl</code>(81 复合物)是按 PDB 的实际选择——我们的复现正是用这两者(经非默认参数);<code>skempi_eval.py</code> 默认评测划分 = <code>test_pdb.pkl</code>。</li>
+    <li>per-interface 指标:<code>baselines/eval_utils.py</code> 按 <code>#Pdb</code> 分组,仅纳入<b>突变数 ≥ THRESHOLD=10</b> 的复合物,跨复合物等权平均 Spearman(test 集 43/81 复合物达标)。</li>
+  </ul></div>
+
+  <h2>7 · 计算方案与显存账(已核验)</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>ESMC-6B full-FT → 必须多卡</h3>
+      <p>混合精度 + Adam,逐项:</p>
+      <pre><code>bf16 参数        12 GB
+fp32 master      24 GB
+Adam m + v       48 GB
+bf16 梯度        12 GB
+────────────────────
+≈ 96 GB  (还没算激活)</code></pre>
+      <p>已超单张 <b>a100-80GB</b> → 需 <b>FSDP / DeepSpeed ZeRO-3 分片 + 梯度检查点</b>。Ibex 多数 a100 节点 <b>4×</b>,<code>gpu4</code> 分区有 <b>8×</b> a100,足够。</p>
+    </div>
+    <div class="card">
+      <h3>ESM3-1.4B / ESMC-600M → 单卡即可</h3>
+      <pre><code>1.4B full-FT  ≈ 1.4B×16B ≈ 22 GB
+0.6B full-FT  ≈ 9–10 GB</code></pre>
+      <p>均可在<b>单张 a100-80GB</b> 上 full-FT(配梯度检查点留余量)。</p>
+    </div>
+  </div>
+  <div class="warnbox"><span class="pill nu">NUANCE</span> <b>StaB 损失的激活开销比想象更重</b>:训练时每个样本约 <b>6 次骨干前向</b>
+  (complex / binder1 / binder2 三个子系统 × {WT, mutant}),每次都要保留激活以反传 —— 激活倍数约 <b>6×</b>(非 3×)。
+  <b>MC ensemble(=20)只在推理期</b>,训练期不乘。这进一步加大 6B 的显存压力,坐实分片 + 检查点的必要性。</div>
+
+  <h2>8 · 目录隔离 & 你的三项要求</h2>
+  <pre><code>esm-backbone-test/
+├── design.html              # 要求(2):本设计文档
+├── download_weights.py      # 权重下载(已运行)
+├── common/   scorer_interface.py · 复用 reproduce/ 的指标&数据
+├── track_esm3/  esm3_scorer.py · ckpts/ · *.sbatch · results_*.md · eval_*.csv
+├── track_esmc/  esmc_scorer.py · fsdp_train.py · ckpts/ · *.sbatch · results_*.md · eval_*.csv
+├── results/   汇总(per-interface Spearman 对比表 + 图)
+└── weights/   esmc_6b/ · esm3_sm_open/ · esmc_600m/   (要求(1):本实验 load-path 在此,gitignored)</code></pre>
+  <table>
+    <tr><th>要求</th><th>落实</th></tr>
+    <tr><td><b>(1)</b> 缺失 ESM 文件随时下载,保留在 esm 原仓库(新分支 <code>reproduce</code>)<b>与</b>本实验仓库;本实验 load-path 在本仓库下</td><td>权重下到 <code>esm/.hf_cache</code>(<code>reproduce</code> 分支,gitignored)<b>并</b>在 <code>esm-backbone-test/weights/</code> 建符号链接,实验代码从本仓库路径加载 ✅</td></tr>
+    <tr><td><b>(2)</b> 改造方案整理成 HTML,放新文件夹 <code>esm-backbone-test/</code></td><td>即本 <code>design.html</code> ✅</td></tr>
+    <tr><td><b>(3)</b> 用 ibex-usage skill 完成所有计算;结果存到 <code>esm-backbone-test/</code> 而非 <code>ibex-records/</code></td><td>sbatch 脚本仍镜像到 Ibex 执行,但<b>结果/result-md/输出 csv 全部落到 <code>esm-backbone-test/</code></b>(覆盖默认惯例)✅</td></tr>
+  </table>
+
+  <h2>9 · 风险(如实标注)</h2>
+  <ul>
+    <li><span class="pill wn">高</span> <b>ESMC-6B FSDP full-FT</b> 是最大风险:6× 前向 × 分片 6B,显存与时长都重;可能需 8× a100 + 梯度检查点,且耗时长。先在极小子集上打通再跑全量。</li>
+    <li><span class="pill nu">中</span> <b>AlphaFold PDB 下载</b>(Stage-1,数十 GB,Zenodo)体积/耗时;ESM3 必需,ESMC 仅取序列。</li>
+    <li><span class="pill nu">中</span> ESM3 <b>结构 tokenize</b> 增加一条预处理流水线与独立缓存。</li>
+    <li><span class="pill nu">低</span> 权重已确认 ungated,无需 HF token(原列为依赖,已排除)。</li>
+  </ul>
+
+  <h2>10 · 复现路径(占位,实现阶段细化)</h2>
+  <pre><code># 0. 权重(已完成):python esm-backbone-test/download_weights.py
+# 1. 各 track 实现 SequenceScorer,本地小样本 smoke test
+# 2. Stage-0 zero-shot eval(SKEMPI test) → 立即看信号
+# 3. ibex: Stage-1 Megascale full-FT → Stage-2 SKEMPI full-FT → eval(ensemble=20)
+#    ESM3: a100:1 ; ESMC-6B: a100:8 + FSDP/ZeRO-3
+# 4. compute per-interface Spearman, 对比 ProteinMPNN 0.445 → 落盘 esm-backbone-test/results/</code></pre>
+
+  <h2>11 · 核验附录(claims × verdict)</h2>
+  <p class="sub">5 个 agent 并行对照 <code>StaB-ddG</code> 与 <code>esm</code> 真实代码核验;此处汇总。全部 <span class="pill ok">SUPPORTED</span> 或 <span class="pill nu">NUANCE</span>(已在正文修正),无 refuted。</p>
+  <table>
+    <tr><th>论断</th><th>判定</th></tr>
+    <tr><td>folding_dG = Σ onehot·log_softmax(pmpnn) = 结构条件序列对数似然</td><td><span class="pill ok">SUPPORTED</span></td></tr>
+    <tr><td>folding_ddG=mut−wt 且 wt/mut 共享 decoding_order+backbone_noise</td><td><span class="pill ok">SUPPORTED</span></td></tr>
+    <tr><td>binding_ddG = complex − (b1+b2);推理 ensemble=20 且 ×(−1)</td><td><span class="pill ok">SUPPORTED</span></td></tr>
+    <tr><td>StaBddG 推理路径无可训练参数(但同模块有未用的 LinearModel)</td><td><span class="pill nu">NUANCE</span></td></tr>
+    <tr><td>Stage-1 用 AlphaFold_model_PDBs(缺失,需下载)+Tsuboyama CSV+mega_splits.pkl</td><td><span class="pill ok">SUPPORTED</span></td></tr>
+    <tr><td>Stage-2 默认划分是 train_clusters.pkl;train_pdb/test_pdb 经非默认参数(我们复现所用)</td><td><span class="pill nu">NUANCE</span></td></tr>
+    <tr><td>per-interface:groupby #Pdb,THRESHOLD=10,等权平均(43/81)</td><td><span class="pill ok">SUPPORTED</span></td></tr>
+    <tr><td>ProteinMPNN 基线 per-interface 0.445(作者 0.448,论文 ~0.45)</td><td><span class="pill ok">SUPPORTED</span></td></tr>
+    <tr><td>ESMC 纯序列(sequence_head=RegressionHead(d,64),无结构)</td><td><span class="pill ok">SUPPORTED</span></td></tr>
+    <tr><td>ESMFold2 仅正向折叠;无 inverse 打分 API(README 提 inversion 但未封装)</td><td><span class="pill nu">NUANCE</span></td></tr>
+    <tr><td>ESM3 多模态(structure_tokens+sequence→sequence_logits),自带 VQ-VAE structure tokenizer</td><td><span class="pill ok">SUPPORTED</span></td></tr>
+    <tr><td>ESMC-600M(d1152/h18/L36≈0.57B) vs 6B(d2560/h40/L80≈6.3B),≈11×</td><td><span class="pill ok">SUPPORTED</span></td></tr>
+    <tr><td>ESM3_sm_open d1536/h24/L48≈1.4B,权重文件 esm3_sm_open_v1.pth</td><td><span class="pill nu">NUANCE</span></td></tr>
+    <tr><td>权重 snapshot_download biohub/*;四个仓库 ungated;6b≈25GB/esm3≈5.5GB</td><td><span class="pill ok">SUPPORTED</span></td></tr>
+    <tr><td>6B full-FT ≈96GB(超单卡80GB)→ 需多卡分片;1.4B≈22GB / 0.6B≈10GB 单卡可</td><td><span class="pill ok">SUPPORTED</span></td></tr>
+    <tr><td>Ibex 多数 a100 节点 4×,gpu4 分区 8×</td><td><span class="pill ok">SUPPORTED</span></td></tr>
+    <tr><td>训练每样本 ~6 次骨干前向(3 子系统×wt/mut);MC ensemble 仅推理期</td><td><span class="pill nu">NUANCE</span></td></tr>
+  </table>
+
+  <footer>
+    StaB-ddG ESM-backbone 实验 · 设计文档 v1 · 2026-06-23 ·
+    分支 <span class="kbd">esm-replace</span>(StaB-ddG)/ <span class="kbd">reproduce</span>(esm)·
+    技术论断经多 agent 代码核验。下一步:writing-plans 出实现计划。
+  </footer>
+</div>
+</body>
+</html>
