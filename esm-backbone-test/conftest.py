@@ -55,52 +55,8 @@ for _p in [str(_WORKTREE_ROOT), str(_THIS_DIR)]:
 
 # --------------------------------------------------------------------------- #
 # Monkey-patch huggingface_hub.load_torch_model to handle .pth snapshots      #
+# (logic lives in common/hf_compat.py so production scripts can apply it too) #
 # --------------------------------------------------------------------------- #
-import huggingface_hub as _hfhub
-import huggingface_hub.serialization._torch as _hf_torch
+from common.hf_compat import apply as _apply_hf
 
-
-def _patched_load_torch_model(model, checkpoint_path, **kwargs):
-    """
-    Wraps hf_hub's load_torch_model to fall back to recursive .pth discovery
-    when the snapshot directory contains no .safetensors / .bin at its root.
-    This is needed for ESM 3.3.0 snapshots which store weights as:
-        <snapshot>/data/weights/<name>.pth
-    """
-    import torch
-    checkpoint_path = Path(checkpoint_path)
-    if checkpoint_path.is_dir():
-        safe = kwargs.get("safe", True)
-        # Check if standard files exist at root
-        if safe:
-            has_std = any(checkpoint_path.glob("*.safetensors")) or (
-                checkpoint_path / "model.safetensors.index.json"
-            ).exists()
-        else:
-            has_std = any(checkpoint_path.glob("*.bin")) or any(
-                checkpoint_path.glob("*.safetensors")
-            )
-        if not has_std:
-            # Fall back: find a single .pth file anywhere in the tree
-            pth_files = list(checkpoint_path.rglob("*.pth"))
-            if len(pth_files) == 1:
-                pth_path = pth_files[0]
-                state_dict = torch.load(
-                    pth_path,
-                    map_location=kwargs.get("map_location", None),
-                    weights_only=kwargs.get("weights_only", False),
-                )
-                return model.load_state_dict(
-                    state_dict, strict=kwargs.get("strict", False), assign=True
-                )
-            elif len(pth_files) > 1:
-                raise ValueError(
-                    f"Multiple .pth files found under {checkpoint_path}: {pth_files}. "
-                    "Cannot determine which to load."
-                )
-    return _original_load_torch_model(model, checkpoint_path, **kwargs)
-
-
-_original_load_torch_model = _hf_torch.load_torch_model
-_hf_torch.load_torch_model = _patched_load_torch_model
-_hfhub.load_torch_model = _patched_load_torch_model
+_apply_hf()
