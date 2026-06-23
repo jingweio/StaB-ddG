@@ -1,0 +1,13 @@
+# large model weights / checkpoints / run artifacts — keep code + docs, not blobs
+weights/
+track_esm3/ckpts/
+track_esmc/ckpts/
+*.pt
+*.pth
+*.safetensors
+*.csv.gz
+__pycache__/
+
+# regression-test fixtures: keep the small dumped sample (one_complex.pkl),
+# but not the bulky parsed-structure cache used only to speed up rebuilds.
+tests/fixtures/skempi_test_pdb_dict.pkl
