@@ -12,3 +12,6 @@ ESM scorers use ensemble=1 (deterministic given inputs; StaB MC ensembling is Pr
 | ESMC-6B | 2-stage FT (FSDP) | _pending (pilot→T11)_ | | | |
 
 **Read:** zero-shot ESM3 carries little binding signal (~0.09) — the two-stage Megascale→SKEMPI finetune is what should lift it toward/over 0.445. Finetuned numbers are the headline comparison.
+
+## Training notes (transparency)
+- **ESM3 Stage-2 (SKEMPI binding):** 6/120 train complexes OOM-skip even at bs=1500 (longest complexes, L≳1000; ESM3 structure-attention is O(B·L²), and a single B=1 forward of those exceeds a100-80GB → unrecoverable by batch_size). So ESM3 stage-2 trains on ~114/120 complexes — a ~5% train bias, ESM3-specific. **Eval is on the full 81-complex test set** (no-grad, lower memory → no skips; zero-shot eval covered all 1491 mutants). Reported for honesty; ProteinMPNN (handles long seqs) had no such skips.
