@@ -71,11 +71,13 @@ class ESMCScorer(SequenceScorer):
         if model is not None:
             self.model = model
         else:
-            self.model = ESMC.from_pretrained(
-                _MODEL_NAMES[model_name],
-                device=torch.device(device),
-                use_flash_attn=use_flash_attn,
-            )
+            # Robust loader (real-init + esmc./lm_head key remap). The official
+            # from_pretrained path left params on meta AND mismatched keys -> RANDOM
+            # weights (shape-only tests passed, logits were garbage). load_esmc RAISES
+            # if any weight is missing after remap (never silent-random). Verified
+            # self-recovery 0.83 for both 600m and 6b.
+            from common.esmc_loader import load_esmc
+            self.model = load_esmc(model_name, device=device, use_flash_attn=use_flash_attn)
         self.model.eval()
 
     @property
