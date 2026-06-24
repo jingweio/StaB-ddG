@@ -25,6 +25,28 @@ The reproduced baseline CSV
 (Spearman 0.531) — confirming NO x-1 in eval.  We mirror that here.
 """
 
+# --------------------------------------------------------------------------- #
+# Path / env bootstrap (mirrors run/finetune.py + run/lr_sweep.py).            #
+# Adds the worktree root (for `stabddg` / `baselines`) and esm-backbone-test/  #
+# (for `common`, `track_*`, `run`) to sys.path, and sets offline-HF env        #
+# BEFORE any heavy import — so `python -m run.eval` works cwd-independently.    #
+# Guarded so importing eval_dataset / write_csv from another module is a no-op  #
+# beyond a couple of idempotent sys.path inserts.                              #
+# --------------------------------------------------------------------------- #
+import os
+import sys
+from pathlib import Path
+
+_RUN_DIR = Path(__file__).resolve().parent          # .../esm-backbone-test/run
+_PKG_ROOT = _RUN_DIR.parent                          # .../esm-backbone-test
+_WORKTREE_ROOT = _PKG_ROOT.parent                    # .../esm-replace
+for _p in (str(_WORKTREE_ROOT), str(_PKG_ROOT)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+os.environ.setdefault("HF_HOME", "/home/guoj0f/repos/esm/.hf_cache")
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import pandas as pd
 import torch
 from tqdm import tqdm
@@ -100,3 +122,118 @@ def write_csv(pred_df, out_csv):
     combined_df["ddG_pred"] = pred_df["Prediction"].to_numpy()
     combined_df.to_csv(out_csv)
     return combined_df
+
+
+# --------------------------------------------------------------------------- #
+# CLI: evaluate a FINETUNED backbone checkpoint on the SKEMPI test split.      #
+#                                                                              #
+#     python -m run.eval --backbone {mpnn,esmc_600m,esmc_6b,esm3} \            #
+#         --checkpoint <ft.pt> --out <csv> [--ensemble 1] [--device cuda] \    #
+#         [--limit K] [--pdb_dir data/SKEMPI2_PDBs]                            #
+#                                                                              #
+# Mirrors run/lr_sweep.py's eval path EXACTLY: build the SKEMPI test dataset,  #
+# build a fresh scorer, load the finetuned backbone weights, wrap in StaBddG,  #
+# run eval_dataset, write_csv in the baseline format.                          #
+# --------------------------------------------------------------------------- #
+
+# SKEMPI test split inputs (resolved against the worktree root, cwd-independent;
+# same paths lr_sweep.py uses). pdb_dir is overridable via --pdb_dir.
+_SKEMPI_CSV = str(_WORKTREE_ROOT / "data/SKEMPI/filtered_skempi.csv")
+_SKEMPI_TEST_SPLIT = str(_WORKTREE_ROOT / "data/SKEMPI/test_pdb.pkl")
+_SKEMPI_PDB_DIR = str(_WORKTREE_ROOT / "data/SKEMPI2_PDBs")
+
+# Evaluation token budget per backbone (no-grad, larger than finetune); mirrors
+# run/lr_sweep.py::EVAL_BATCH_SIZE.
+_EVAL_BATCH_SIZE = {
+    "mpnn": 10000,
+    "esmc_600m": 10000,
+    "esmc_6b": 10000,
+    "esm3": 2000,
+}
+
+
+def _build_eval_dataset(pdb_dir, limit=None):
+    """Build the SKEMPI test-split dataset (optionally first K complexes).
+
+    Mirrors run/lr_sweep.py::_build_eval_dataset (same csv / split / cache).
+    """
+    from stabddg.ppi_dataset import SKEMPIDataset
+
+    dataset = SKEMPIDataset(
+        csv_path=_SKEMPI_CSV,
+        split_path=_SKEMPI_TEST_SPLIT,
+        pdb_dir=pdb_dir,
+        pdb_dict_cache_path="cache/skempi_test_pdb_dict.pkl",
+        af_apo_structures=False,
+    )
+    if limit is not None:
+        dataset.data = dataset.data[:limit]
+    return dataset
+
+
+def main():
+    import argparse
+
+    from common.build_scorer import build_scorer
+    from common.stab_model import StaBddG
+    # _load_checkpoint_for_esm: build_scorer only honours --checkpoint for the
+    # `mpnn` backbone; for esm3/esmc the factory ignores it, so the finetuned
+    # backbone weights are loaded into scorer.backbone_module AFTER the build
+    # (no-op for mpnn / when checkpoint is None) — exactly as finetune.py does.
+    from run.finetune import _load_checkpoint_for_esm
+
+    ap = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description="Evaluate a finetuned backbone checkpoint on the SKEMPI test split.",
+    )
+    ap.add_argument("--backbone", required=True,
+                    choices=["mpnn", "esmc_600m", "esmc_6b", "esm3"])
+    ap.add_argument("--checkpoint", type=str, required=True,
+                    help="finetuned backbone state_dict (mpnn: StaB-ddG ckpt; "
+                         "esm*: consolidated/per-epoch backbone state_dict)")
+    ap.add_argument("--out", type=str, required=True, help="output CSV path")
+    ap.add_argument("--ensemble", type=int, default=1, help="eval ensemble size")
+    ap.add_argument("--batch_size", type=int, default=None,
+                    help="TOKEN budget per forward (default: per-backbone)")
+    ap.add_argument("--device", type=str, default="cuda")
+    ap.add_argument("--limit", type=int, default=None,
+                    help="first K eval complexes (smoke)")
+    ap.add_argument("--pdb_dir", type=str, default=_SKEMPI_PDB_DIR,
+                    help="SKEMPI PDB directory")
+    args = ap.parse_args()
+
+    device = (torch.device("cuda" if torch.cuda.is_available() else "cpu")
+              if args.device == "cuda" else torch.device(args.device))
+    batch_size = args.batch_size or _EVAL_BATCH_SIZE.get(args.backbone, 10000)
+
+    # Build a fresh scorer. For `mpnn`, build_scorer loads --checkpoint directly;
+    # for esm3/esmc it ignores it, so we load the finetuned weights afterwards.
+    scorer = build_scorer(
+        args.backbone,
+        device=str(device),
+        checkpoint=args.checkpoint,
+        pdb_dir=args.pdb_dir,
+    )
+    _load_checkpoint_for_esm(scorer, args.backbone, args.checkpoint)
+    scorer.to(device)
+
+    model = StaBddG(scorer).to(device).eval()
+    dataset = _build_eval_dataset(args.pdb_dir, limit=args.limit)
+
+    print(f"[eval] backbone={args.backbone} ckpt={args.checkpoint} "
+          f"complexes={len(dataset)} ensemble={args.ensemble} "
+          f"batch_size(tokens)={batch_size} device={device}", flush=True)
+
+    with torch.no_grad():
+        pred_df = eval_dataset(model, dataset, ensemble=args.ensemble,
+                               batch_size=batch_size, device=str(device))
+
+    out_dir = os.path.dirname(args.out)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    write_csv(pred_df, args.out)
+    print(f"[eval] wrote {args.out} ({len(pred_df)} rows)", flush=True)
+
+
+if __name__ == "__main__":
+    main()
