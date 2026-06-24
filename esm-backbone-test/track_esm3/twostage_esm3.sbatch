@@ -24,7 +24,7 @@ S2=40                   # stage-2 (SKEMPI) epochs
 # graphs per binding step, so the SKEMPI (stage-2) token budget must stay modest.
 # Stage-1 folding does ONE forward per step, so it tolerates a larger budget.
 BS_STAGE1=3000          # Megascale folding-stability token budget
-BS_STAGE2=3000          # SKEMPI binding token budget
+BS_STAGE2=1500          # SKEMPI: conservative to avoid OOM-skipping long complexes on a100
 RUN1=esm3_stage1
 RUN2=esm3_stage2
 CKPT_DIR=track_esm3/ckpts
