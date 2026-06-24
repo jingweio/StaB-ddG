@@ -28,7 +28,7 @@ cd /ibex/user/guoj0f/repos/StaB-ddG/esm-backbone-test
 # flash-attn IS installed on Ibex -> use_flash_attn 1; bf16 mixed precision on a100.
 # -m module form: fsdp_train_esmc6b.py prepends the worktree root + esm-backbone-test
 # onto sys.path at import, so `track_esmc` / `common` / `stabddg` all resolve.
-torchrun --nproc_per_node=4 -m track_esmc.fsdp_train_esmc6b \
+torchrun --standalone --nproc_per_node=4 -m track_esmc.fsdp_train_esmc6b \
   --backbone esmc_6b --stage skempi --lr 1e-5 --epochs 1 --batch_size 8000 \
   --limit 5 --use_flash_attn 1 --mixed_precision bf16 \
   --out track_esmc/ckpts --run_name pilot_esmc6b_4g
