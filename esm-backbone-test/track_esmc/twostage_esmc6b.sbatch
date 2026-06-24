@@ -3,7 +3,7 @@
 #SBATCH --gres=gpu:a100:4
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=240G
-#SBATCH --time=48:00:00
+#SBATCH --time=70:00:00
 #SBATCH --output=/ibex/user/guoj0f/repos/StaB-ddG/esm-backbone-test/results/twostage_esmc6b_%j.out
 #SBATCH --error=/ibex/user/guoj0f/repos/StaB-ddG/esm-backbone-test/results/twostage_esmc6b_%j.err
 
@@ -22,8 +22,8 @@ set -euo pipefail
 
 # ----------------------------- tunable params ----------------------------- #
 LR=1e-5                 # full-FT of pretrained ESM-C (1e-6 is for tiny ProteinMPNN)
-S1=30                   # stage-1 (Megascale) epochs
-S2=40                   # stage-2 (SKEMPI) epochs
+S1=15                   # stage-1 (Megascale) epochs (converges ~15; ESM3 evidence)
+S2=25                   # stage-2 (SKEMPI) epochs
 BS=8000                 # token budget per forward (validated by the 4xa100 pilot)
 RUN1=esmc6b_stage1
 RUN2=esmc6b_stage2
