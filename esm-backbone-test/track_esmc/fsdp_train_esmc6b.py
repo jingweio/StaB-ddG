@@ -78,6 +78,10 @@ from common.stab_model import StaBddG
 from stabddg.ppi_dataset import SKEMPIDataset
 from esm.layers.blocks import UnifiedTransformerBlock
 
+# Reuse the EXACT Megascale (stage-1) data loader from the single-GPU entrypoint
+# so the FSDP harness builds an identical folding-stability dataset.
+from run.finetune import build_stability_dataset, MEGA_PDB_DIR, MEGA_STABILITY_CSV, MEGA_SPLITS
+
 # SKEMPI (stage-2) inputs, resolved against the worktree root so the entrypoint
 # is cwd-independent.
 SKEMPI_CSV = str(_WORKTREE_ROOT / "data/SKEMPI/filtered_skempi.csv")
@@ -343,6 +347,87 @@ def train(model, train_dataset, args, device, rank):
         fsdp_module.train()
 
 
+def train_stability(model, dataset_train, ddG_data, args, device, rank):
+    """Megascale single-domain folding-stability finetune over the FSDP backbone.
+
+    Stage-1 analogue of :func:`train`: each ``sample`` is ONE AlphaFold domain and
+    the loss is per-chunk MSE on ``model.scorer.folding_ddG(sample, chunk)``
+    DIRECTLY — NO complex/binder decomposition, NO ``StaBddG`` binding wrapper.
+    Same FSDP mechanics as the stage-2 loop: optimize the FSDP-wrapped module's
+    sharded params (ZeRO-3), every rank runs the same data in lock-step, and after
+    each epoch reset the FSDP handles to IDLE before a consolidated save.
+    """
+    fsdp_module = model.scorer.model.fsdp_module
+    optimizer = torch.optim.AdamW(fsdp_module.parameters(), lr=args.lr)
+    ddG_loss_fn = torch.nn.MSELoss()
+
+    fsdp_module.train()
+
+    if is_main(rank):
+        os.makedirs(args.out, exist_ok=True)
+        log_path = os.path.join(args.out, f"{args.run_name}_train_log.csv")
+        with open(log_path, "w") as lf:
+            lf.write("timestamp,epoch,mean_loss\n")
+        rank0_print(rank, f"[train log] per-epoch mean loss -> {log_path}")
+
+    global_step = 0
+    stop = False
+    for epoch in range(args.epochs):
+        if stop:
+            break
+        epoch_losses = []
+        for sample in dataset_train:
+            if stop:
+                break
+            try:
+                key = f"{sample['name']}.pdb"
+                ddG = ddG_data[key]["ddG"].float().to(device)
+                mut_seqs = ddG_data[key]["mut_seqs"]
+
+                N = mut_seqs.shape[0]
+                if N == 0:
+                    continue
+                M = max(1, args.batch_size // mut_seqs.shape[1])
+
+                # Deterministic per-(epoch, domain) permutation so all ranks agree
+                # on the chunk order (FSDP collectives are ordered).
+                g = torch.Generator()
+                g.manual_seed(args.seed + epoch * 100003 + abs(hash(sample["name"])) % 100003)
+                perm = torch.randperm(N, generator=g)
+                ddG = ddG[perm]
+                mut_seqs = mut_seqs[perm]
+
+                for i in range(0, N, M):
+                    B = min(N - i, M)
+                    pred = model.scorer.folding_ddG(sample, mut_seqs[i:i + B])
+                    loss = ddG_loss_fn(pred, ddG[i:i + B])
+                    loss.backward()
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    epoch_losses.append(loss.item())
+                    global_step += 1
+                    rank0_print(rank, f"[step {global_step}] loss = {loss.item():.6f}")
+                    if args.max_steps is not None and global_step >= args.max_steps:
+                        stop = True
+                        break
+            except Exception as e:
+                rank0_print(rank, "Failed on", sample.get("name"), repr(e))
+                optimizer.zero_grad(set_to_none=True)
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+        mean_loss = (sum(epoch_losses) / len(epoch_losses)) if epoch_losses else float("nan")
+        rank0_print(rank, f"[epoch {epoch + 1}/{args.epochs}] mean train loss = {mean_loss:.6f}")
+        if is_main(rank):
+            with open(log_path, "a") as lf:
+                lf.write(f"{datetime.datetime.now().isoformat(timespec='seconds')},"
+                         f"{epoch + 1},{mean_loss:.6f}\n")
+
+        reset_fsdp_to_idle(model, device)
+        save_consolidated_checkpoint(model, args, epoch, rank)
+        fsdp_module.train()
+
+
 # --------------------------------------------------------------------------- #
 # Sharded -> consolidated checkpoint save                                       #
 # --------------------------------------------------------------------------- #
@@ -396,17 +481,20 @@ def save_consolidated_checkpoint(model, args, epoch, rank):
 def main():
     ap = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     ap.add_argument("--backbone", required=True, choices=["esmc_600m", "esmc_6b"])
-    ap.add_argument("--stage", default="skempi", choices=["skempi"],
-                    help="only the SKEMPI (stage-2) binding finetune is implemented")
+    ap.add_argument("--stage", default="skempi", choices=["skempi", "stability"],
+                    help="skempi = SKEMPI binding (stage-2); "
+                         "stability = Megascale folding stability (stage-1)")
     ap.add_argument("--checkpoint", type=str, default=None,
-                    help="optional init weights (a consolidated ESM-C state_dict)")
+                    help="optional init weights (a consolidated ESM-C state_dict); "
+                         "chains stage-1 -> stage-2")
     ap.add_argument("--lr", type=float, default=1e-5)
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--batch_size", type=int, default=2000,
                     help="TOKEN budget per forward (B = max(1, batch_size // L))")
     ap.add_argument("--out", type=str, required=True, help="checkpoint/log output dir")
     ap.add_argument("--run_name", type=str, required=True)
-    ap.add_argument("--limit", type=int, default=None, help="first K train complexes")
+    ap.add_argument("--limit", type=int, default=None,
+                    help="first K train complexes (skempi) / domains (stability)")
     ap.add_argument("--max_steps", type=int, default=None,
                     help="cap on total optimizer steps (smoke / pilot); None = full epochs")
     ap.add_argument("--use_flash_attn", type=int, default=1, choices=[0, 1],
@@ -418,6 +506,13 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--pdb_dict_cache_path", type=str,
                     default="cache/skempi_train_pdb_dict.pkl")
+    # Stage-1 (stability) inputs.
+    ap.add_argument("--pdb_dir", type=str, default=MEGA_PDB_DIR,
+                    help="(stability) AlphaFold domain PDB directory")
+    ap.add_argument("--stability_csv", type=str, default=MEGA_STABILITY_CSV,
+                    help="(stability) Tsuboyama Dataset2/3 ddG CSV")
+    ap.add_argument("--mega_splits", type=str, default=MEGA_SPLITS,
+                    help="(stability) mega_splits.pkl train/val/test domain lists")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -463,12 +558,19 @@ def main():
                       f"mp={args.mixed_precision}); ESM-C blocks sharded across "
                       f"{world_size} rank(s)")
 
-    # 4) StaBddG + train.
+    # 4) StaBddG + train. Stage-2 (skempi) uses StaBddG.binding_ddG; stage-1
+    #    (stability) calls scorer.folding_ddG directly (no binding decomposition).
     model = StaBddG(scorer)
-    train_dataset = build_train_dataset(args.pdb_dict_cache_path, limit=args.limit)
-    rank0_print(rank, f"[fsdp] train complexes = {len(train_dataset)}")
-
-    train(model, train_dataset, args, device, rank)
+    if args.stage == "stability":
+        dataset_train, ddG_data = build_stability_dataset(
+            args.pdb_dir, args.stability_csv, args.mega_splits, limit=args.limit
+        )
+        rank0_print(rank, f"[fsdp] train domains = {len(dataset_train)}")
+        train_stability(model, dataset_train, ddG_data, args, device, rank)
+    else:
+        train_dataset = build_train_dataset(args.pdb_dict_cache_path, limit=args.limit)
+        rank0_print(rank, f"[fsdp] train complexes = {len(train_dataset)}")
+        train(model, train_dataset, args, device, rank)
 
     # 6) Clean shutdown.
     dist.barrier()

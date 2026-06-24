@@ -1,33 +1,51 @@
 """
-finetune.py — backbone-agnostic, single-GPU SKEMPI binding finetune.
+finetune.py — backbone-agnostic, single-GPU StaB-ddG finetune (two stages).
 
-Reuses StaB-ddG's EXACT SKEMPI (stage-2) training recipe (ported verbatim from
-``skempi_finetune.py``'s inner loop) but drives any backbone behind the
-:class:`common.scorer.SequenceScorer` interface (ProteinMPNN / ESM-C / ESM3).
+Drives any backbone behind the :class:`common.scorer.SequenceScorer` interface
+(ProteinMPNN / ESM-C / ESM3) through one of two training recipes:
+
+  - ``--stage skempi``    : SKEMPI binding ddG (stage-2). Ported verbatim from
+    ``skempi_finetune.py``'s inner loop. Each sample is a complex decomposed into
+    complex/binder1/binder2 sub-structures, scored through ``StaBddG.binding_ddG``.
+  - ``--stage stability`` : Megascale single-domain folding-stability ddG
+    (stage-1). Ported from the original ``stability_finetune.py``: one AlphaFold
+    structure per domain, scored DIRECTLY via ``scorer.folding_ddG(domain, chunk)``
+    (NO complex/binder decomposition, NO StaBddG wrapper).
 
 The optimizer trains ``scorer.backbone_module.parameters()`` and each epoch saves
 ``scorer.backbone_module.state_dict()`` — so the same loop works for every
-backbone without knowing its internals.
+backbone without knowing its internals. The two-stage pipeline (Megascale ->
+SKEMPI) is chained by passing the stage-1 checkpoint to stage-2 via
+``--checkpoint``.
 
 Usage
 -----
-    # smoke (one train complex, two epochs) on the A4500:
+    # SKEMPI (stage-2) smoke (one train complex, two epochs) on the A4500:
     CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 \
         python -m run.finetune --backbone esmc_600m --stage skempi \
         --epochs 2 --limit 1 --out cache/ft_smoke --run_name esmc_smoke
 
+    # Megascale stability (stage-1) smoke (three train domains, two epochs):
+    CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 \
+        python -m run.finetune --backbone esmc_600m --stage stability \
+        --epochs 2 --limit 3 --out cache/s1_smoke --run_name esmc_s1
+
 CLI
 ---
     --backbone {mpnn,esmc_600m,esmc_6b,esm3}   required
-    --stage skempi                             only SKEMPI (stage-2) implemented
+    --stage {skempi,stability}                 stage-2 (binding) or stage-1 (folding)
     --checkpoint <path>                        optional init weights for the backbone
+                                               (chains stage-1 -> stage-2)
     --lr <float>                               default 1e-5
     --epochs <int>                             required
     --batch_size <int>                         TOKEN budget per forward (NOT #seqs)
     --out <dir>                                checkpoint + log output dir
     --run_name <str>                           prefix for checkpoints/log
     --device cuda                              torch device
-    --limit K                                  first K train complexes (smoke)
+    --limit K                                  first K train complexes/domains (smoke)
+    --pdb_dir <dir>                            (stability) AlphaFold domain PDB dir
+    --stability_csv <path>                     (stability) Tsuboyama Dataset2/3 CSV
+    --mega_splits <path>                       (stability) mega_splits.pkl
 
 Memory note
 -----------
@@ -82,17 +100,34 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 # activations (the six retained scorer graphs per ddG step).
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
+import pickle
+
+import numpy as np
+import pandas as pd
 import torch
 
 from common.build_scorer import build_scorer
 from common.stab_model import StaBddG
 from stabddg.ppi_dataset import SKEMPIDataset
+from stabddg.mpnn_utils import StructureDataset, parse_PDB
 
 # SKEMPI (stage-2) inputs, resolved against the worktree root so the entrypoint
 # is cwd-independent (data/ lives at the worktree root alongside stabddg/).
 SKEMPI_CSV = str(_WORKTREE_ROOT / "data/SKEMPI/filtered_skempi.csv")
 SKEMPI_TRAIN_SPLIT = str(_WORKTREE_ROOT / "data/SKEMPI/train_pdb.pkl")
 SKEMPI_PDB_DIR = str(_WORKTREE_ROOT / "data/SKEMPI2_PDBs")
+
+# Megascale (stage-1, folding-stability) inputs, also resolved against the
+# worktree root. These mirror stability_finetune.py's argparse defaults.
+MEGA_PDB_DIR = str(_WORKTREE_ROOT / "data/AlphaFold_model_PDBs")
+MEGA_STABILITY_CSV = str(
+    _WORKTREE_ROOT
+    / "data/Processed_K50_dG_datasets/Tsuboyama2023_Dataset2_Dataset3_20230416.csv"
+)
+MEGA_SPLITS = str(_WORKTREE_ROOT / "data/rocklin/mega_splits.pkl")
+
+# StaB alphabet (mpnn_utils.py:211); ALPHABET in stability_finetune.py.
+_STAB_ALPHABET = "ACDEFGHIKLMNPQRSTVWYX"
 
 # Per-backbone default TOKEN budgets for TRAINING (smaller than eval: six
 # retained scorer graphs per step). Measured on the 20GB A4500 — see module
@@ -114,6 +149,104 @@ def build_train_dataset(pdb_dict_cache_path, limit=None):
         # SKEMPIDataset is list-backed (self.data); restrict to first K complexes.
         dataset.data = dataset.data[:limit]
     return dataset
+
+
+def build_stability_dataset(pdb_dir, stability_csv, mega_splits, limit=None):
+    """Build the Megascale (stage-1) folding-stability train set.
+
+    Faithful port of ``stability_finetune.py``'s data-loading code (read
+    ``mega_splits.pkl`` -> parse the train-split AlphaFold domain PDBs via
+    ``parse_PDB`` -> build ``ddG_data[f'{name}.pdb'] = {'ddG', 'mut_seqs'}`` from
+    the Tsuboyama Dataset2/3 CSV). Only the TRAIN split is used (finetuning loops
+    over train domains; val/test scoring is out of scope for this entrypoint).
+
+    Returns ``(dataset_train, ddG_data)`` where ``dataset_train`` is a
+    ``StructureDataset`` of parsed AF domains (each masked on chain 'A', matching
+    the original) and ``ddG_data`` maps ``f'{name}.pdb' -> {'ddG'[N], 'mut_seqs'
+    [N, L] int tensor}``. The training loop reads ``sample['name']`` to index
+    ``ddG_data`` exactly as the original does.
+
+    ``limit`` restricts to the first K train domains (numeric/list order of the
+    split). When set, the CSV read is restricted to just those domains' rows via a
+    chunked filter so the 666 MB file does not have to be fully materialised — a
+    smoke-only fast path. With ``limit=None`` the full CSV is read (one-time, slow:
+    see the module concerns / results note).
+    """
+    # 1) Read split file; use the TRAIN split (matches the finetune loop scope).
+    with open(mega_splits, "rb") as f:
+        splits = pickle.load(f)
+    train_names = list(splits["train"])
+    if limit is not None:
+        train_names = train_names[:limit]
+
+    # 2) Parse AF domain structures. The original maps a split name (e.g.
+    #    'r10_437_TrROS_Hall.pdb') to a file by stripping after '.pdb' and
+    #    replacing '|' -> ':' (a handful of WT_names embed '|', though none in the
+    #    current train/val/test splits do).
+    pdb_dict_train = []
+    for name in train_names:
+        fname = name.split(".pdb", 1)[0] + ".pdb"
+        fname = fname.replace("|", ":")
+        path = os.path.join(pdb_dir, fname)
+        pdb_dict_train.append(parse_PDB(path)[0])
+
+    # 3) Build ddG_data from the Tsuboyama CSV (verbatim filters from the original:
+    #    keep ddG_ML != '-', drop ins/del mutations, drop the wt row, match on
+    #    WT_name == the RAW split name).
+    keep_cols = ["WT_name", "mut_type", "aa_seq", "ddG_ML"]
+    wt_name_set = set(train_names)
+
+    if limit is not None:
+        # Smoke fast path: stream the CSV in chunks and keep only the rows whose
+        # WT_name is one of the (few) limited domains, so we never hold the full
+        # 666 MB frame in memory. Equivalent result to the full read + filter.
+        kept = []
+        for chunk in pd.read_csv(
+            stability_csv, usecols=keep_cols, low_memory=True, chunksize=200_000
+        ):
+            kept.append(chunk[chunk["WT_name"].isin(wt_name_set)])
+        df = pd.concat(kept, ignore_index=True) if kept else pd.DataFrame(columns=keep_cols)
+    else:
+        df = pd.read_csv(stability_csv, usecols=keep_cols, low_memory=False)
+
+    dataset_3 = df[df["ddG_ML"] != "-"]
+    dataset_3_noindel = dataset_3.loc[
+        ~dataset_3.mut_type.str.contains("ins")
+        & ~dataset_3.mut_type.str.contains("del"),
+        :,
+    ].reset_index(drop=True)
+
+    ddG_data = {}
+    for name in train_names:
+        cleaned_name = name.split(".pdb", 1)[0] + ".pdb"
+        cleaned_name = cleaned_name.replace("|", ":")
+        mut_df = dataset_3_noindel[
+            (dataset_3_noindel["WT_name"] == name)
+            & (dataset_3_noindel["mut_type"] != "wt")
+        ]
+        ddG_data[cleaned_name] = {
+            "mut_seqs": mut_df["aa_seq"].to_list(),
+            "ddG": mut_df["ddG_ML"].to_numpy(dtype=np.float32),
+        }
+
+    # 4) Featurize mutant sequences as StaB-alphabet index tensors (verbatim).
+    for name, entry in ddG_data.items():
+        index_matrix = []
+        for s in entry["mut_seqs"]:
+            indices = np.asarray([_STAB_ALPHABET.index(a) for a in s], dtype=np.int64)
+            index_matrix.append(indices)
+        index_matrix = np.vstack(index_matrix)
+        ddG_data[name]["mut_seqs"] = torch.from_numpy(index_matrix)
+        ddG_data[name]["ddG"] = torch.tensor(entry["ddG"])
+
+    # 5) Mask all input chains (single-chain AF domains -> chain 'A'), matching
+    #    the original. Harmless for ESM-C/ESM3 (they read seq/coords, not masks).
+    for d in pdb_dict_train:
+        d["masked_list"] = ["A"]
+        d["visible_list"] = []
+
+    dataset_train = StructureDataset(pdb_dict_train, truncate=None, max_length=3000)
+    return dataset_train, ddG_data
 
 
 def finetune(model, train_dataset, args, device):
@@ -193,15 +326,114 @@ def finetune(model, train_dataset, args, device):
         print(f"[ckpt] saved {ckpt_path}", flush=True)
 
 
+def finetune_stability(scorer, dataset_train, ddG_data, args, device):
+    """Port of ``stability_finetune.py``'s inner Megascale training loop.
+
+    Single-domain FOLDING ddG: each ``sample`` is ONE AlphaFold structure and the
+    loss is MSE on ``scorer.folding_ddG(sample, chunk)`` directly — NO complex /
+    binder decomposition and NO ``StaBddG`` wrapper (that is the stage-2 binding
+    path). Trains ``scorer.backbone_module`` with Adam + per-chunk token-budget
+    batching and per-domain mutant shuffling, mirroring the original recipe and
+    the stage-2 loop's logging / per-epoch checkpoint save.
+    """
+    backbone = scorer.backbone_module
+
+    optimizer = torch.optim.Adam(backbone.parameters(), lr=args.lr)
+    ddG_loss_fn = torch.nn.MSELoss()
+
+    backbone.train()
+    backbone.requires_grad_(True)
+
+    os.makedirs(args.out, exist_ok=True)
+    log_path = os.path.join(args.out, f"{args.run_name}_train_log.csv")
+    with open(log_path, "w") as lf:
+        lf.write("timestamp,epoch,mean_loss\n")
+    print(f"[train log] per-epoch mean loss -> {log_path}", flush=True)
+
+    for epoch in range(args.epochs):
+        epoch_losses = []
+        for sample in dataset_train:
+            try:
+                pdb_name = sample["name"]
+                key = f"{pdb_name}.pdb"
+                ddG = ddG_data[key]["ddG"].float().to(device)
+                mut_seqs = ddG_data[key]["mut_seqs"]
+
+                N = mut_seqs.shape[0]
+                if N == 0:
+                    continue
+                # token budget -> number of sequences per forward batch
+                M = max(1, args.batch_size // mut_seqs.shape[1])
+
+                # shuffle mutants within this domain (matches original recipe)
+                perm = torch.randperm(N)
+                ddG = ddG[perm]
+                mut_seqs = mut_seqs[perm]
+
+                for i in range(0, N, M):
+                    B = min(N - i, M)
+                    pred = scorer.folding_ddG(sample, mut_seqs[i:i + B])
+                    loss = ddG_loss_fn(pred, ddG[i:i + B])
+                    loss.backward()
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    epoch_losses.append(loss.item())
+            except Exception as e:
+                # Mirror the stage-2 loop: skip a failed domain, drop the half-built
+                # graph and reclaim cached allocator blocks (heavy ESM3 backbone
+                # near the 20 GB ceiling on long domains) so one failure does not
+                # compound into the next.
+                print("Failed on", sample.get("name"), repr(e), flush=True)
+                optimizer.zero_grad(set_to_none=True)
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+        mean_loss = (sum(epoch_losses) / len(epoch_losses)) if epoch_losses else float("nan")
+        print(f"[epoch {epoch + 1}/{args.epochs}] mean train loss = {mean_loss:.6f}",
+              flush=True)
+        with open(log_path, "a") as lf:
+            lf.write(f"{datetime.datetime.now().isoformat(timespec='seconds')},"
+                     f"{epoch + 1},{mean_loss:.6f}\n")
+
+        ckpt_path = os.path.join(args.out, f"{args.run_name}_{epoch + 1}.pt")
+        torch.save(backbone.state_dict(), ckpt_path)
+        print(f"[ckpt] saved {ckpt_path}", flush=True)
+
+
+def _load_checkpoint_for_esm(scorer, backbone, checkpoint):
+    """Load a prior-stage backbone state_dict into an ESM-C / ESM3 scorer.
+
+    ``build_scorer`` honours ``--checkpoint`` only for the ``mpnn`` backbone (it
+    loads the ProteinMPNN weights there). For ESM-C / ESM3 the factory ignores it,
+    so to chain stage-1 -> stage-2 (or resume) we load the consolidated backbone
+    state_dict into ``scorer.backbone_module`` AFTER the scorer is built. No-op for
+    mpnn (already handled) or when ``checkpoint`` is None.
+    """
+    if checkpoint is None or backbone == "mpnn":
+        return
+    sd = torch.load(checkpoint, map_location="cpu")
+    # Tolerate a checkpoint that wraps the state_dict under a common key.
+    if isinstance(sd, dict) and "model_state_dict" in sd:
+        sd = sd["model_state_dict"]
+    missing, unexpected = scorer.backbone_module.load_state_dict(sd, strict=False)
+    if missing or unexpected:
+        print(f"[checkpoint] load_state_dict non-strict: "
+              f"{len(missing)} missing, {len(unexpected)} unexpected keys",
+              flush=True)
+    print(f"[checkpoint] loaded backbone init weights from {checkpoint}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     ap.add_argument("--backbone", required=True,
                     choices=["mpnn", "esmc_600m", "esmc_6b", "esm3"])
-    ap.add_argument("--stage", default="skempi", choices=["skempi"],
-                    help="only the SKEMPI (stage-2) binding finetune is implemented")
+    ap.add_argument("--stage", default="skempi", choices=["skempi", "stability"],
+                    help="skempi = SKEMPI binding (stage-2); "
+                         "stability = Megascale folding stability (stage-1)")
     ap.add_argument("--checkpoint", type=str, default=None,
                     help="optional init weights for the backbone "
-                         "(mpnn: StaB-ddG ckpt; esm*: backbone state_dict)")
+                         "(mpnn: StaB-ddG ckpt; esm*: backbone state_dict). "
+                         "Chains stage-1 -> stage-2.")
     ap.add_argument("--lr", type=float, default=1e-5)
     ap.add_argument("--epochs", type=int, required=True)
     ap.add_argument("--batch_size", type=int, default=None,
@@ -211,11 +443,18 @@ def main():
     ap.add_argument("--run_name", type=str, required=True)
     ap.add_argument("--device", type=str, default="cuda")
     ap.add_argument("--limit", type=int, default=None,
-                    help="first K train complexes (smoke)")
+                    help="first K train complexes (skempi) / domains (stability)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--pdb_dict_cache_path", type=str,
                     default="cache/skempi_train_pdb_dict.pkl",
-                    help="structure-dict cache (built on first run)")
+                    help="(skempi) structure-dict cache (built on first run)")
+    # Stage-1 (stability) inputs — default to the Megascale paths under data/.
+    ap.add_argument("--pdb_dir", type=str, default=MEGA_PDB_DIR,
+                    help="(stability) AlphaFold domain PDB directory")
+    ap.add_argument("--stability_csv", type=str, default=MEGA_STABILITY_CSV,
+                    help="(stability) Tsuboyama Dataset2/3 ddG CSV")
+    ap.add_argument("--mega_splits", type=str, default=MEGA_SPLITS,
+                    help="(stability) mega_splits.pkl train/val/test domain lists")
     args = ap.parse_args()
 
     if args.batch_size is None:
@@ -225,6 +464,31 @@ def main():
     device = (torch.device("cuda" if torch.cuda.is_available() else "cpu")
               if args.device == "cuda" else torch.device("cpu"))
 
+    if args.stage == "stability":
+        # Stage-1: Megascale single-domain folding stability. The ESM3 scorer must
+        # resolve domain['name'] to the AlphaFold PDBs (NOT the SKEMPI dir), so the
+        # scorer is built with the AF pdb_dir.
+        dataset_train, ddG_data = build_stability_dataset(
+            args.pdb_dir, args.stability_csv, args.mega_splits, limit=args.limit
+        )
+        scorer = build_scorer(
+            args.backbone,
+            device=str(device),
+            checkpoint=args.checkpoint,
+            pdb_dir=args.pdb_dir,
+        )
+        _load_checkpoint_for_esm(scorer, args.backbone, args.checkpoint)
+        scorer.to(device)
+
+        print(f"[finetune] backbone={args.backbone} stage=stability "
+              f"lr={args.lr} epochs={args.epochs} "
+              f"batch_size(tokens)={args.batch_size} "
+              f"domains={len(dataset_train)} device={device}", flush=True)
+
+        finetune_stability(scorer, dataset_train, ddG_data, args, device)
+        return
+
+    # Stage-2: SKEMPI binding.
     train_dataset = build_train_dataset(args.pdb_dict_cache_path, limit=args.limit)
 
     scorer = build_scorer(
@@ -233,6 +497,7 @@ def main():
         checkpoint=args.checkpoint,
         pdb_dir=SKEMPI_PDB_DIR,
     )
+    _load_checkpoint_for_esm(scorer, args.backbone, args.checkpoint)
     model = StaBddG(scorer).to(device)
 
     print(f"[finetune] backbone={args.backbone} stage={args.stage} "
