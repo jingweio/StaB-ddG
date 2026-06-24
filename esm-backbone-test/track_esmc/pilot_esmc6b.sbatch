@@ -14,8 +14,9 @@
 
 set -euo pipefail
 
-source /ibex/user/guoj0f/anaconda3/etc/profile.d/conda.sh
-conda activate esm-backbone
+# Use the env's bin directly (robust; `conda activate` is unreliable in non-login shells).
+export PATH=/ibex/user/guoj0f/anaconda3/envs/esm-backbone/bin:$PATH
+echo "python -> $(which python); torchrun -> $(which torchrun)"
 
 export HF_HOME=/ibex/user/guoj0f/repos/esm/.hf_cache
 export HF_HUB_OFFLINE=1
