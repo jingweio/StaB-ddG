@@ -73,8 +73,10 @@ def eval_dataset(model, dataset, ensemble=20, batch_size=10000, device="cuda"):
         for _ in range(ensemble):
             with torch.no_grad():
                 N = complex_mut_seqs.shape[0]
-                # convert token budget to number of sequences per batch
-                M = batch_size // complex_mut_seqs.shape[1]
+                # convert token budget to number of sequences per batch.
+                # max(1,...) guard: a complex with L > batch_size (e.g. the L=3397
+                # train complex) gives M=0 -> range(0,N,0) ValueError. Force >=1.
+                M = max(1, batch_size // complex_mut_seqs.shape[1])
 
                 binding_ddG_pred_ = []
                 for batch_idx in range(0, N, M):

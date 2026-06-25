@@ -15,3 +15,14 @@ ESM scorers use ensemble=1 (deterministic given inputs; StaB MC ensembling is Pr
 
 ## Training notes (transparency)
 - **ESM3 Stage-2 (SKEMPI binding):** 6/120 train complexes OOM-skip even at bs=1500 (longest complexes, L≳1000; ESM3 structure-attention is O(B·L²), and a single B=1 forward of those exceeds a100-80GB → unrecoverable by batch_size). So ESM3 stage-2 trains on ~114/120 complexes — a ~5% train bias, ESM3-specific. **Eval is on the full 81-complex test set** (no-grad, lower memory → no skips; zero-shot eval covered all 1491 mutants). Reported for honesty; ProteinMPNN (handles long seqs) had no such skips.
+
+## ESM3 hyperparameter evaluation — Round 1 (Stage-2 from converged Stage-1, 15 epochs, eval test)
+| lr | recipe | final train loss | test per-iface Spearman |
+|---|---|---:|---:|
+| 1e-6 | Adam | 11.99 | 0.006 |
+| 3e-6 | Adam | 7.87 | 0.019 |
+| 1e-5 | Adam (=old) | 3.69 | 0.075 |
+| **3e-5** | **Adam** | **1.73** | **0.134** |
+| 1e-5 | AdamW+warmup+cosine | 4.75 | 0.104 |
+| 3e-6 | AdamW+warmup+cosine | 8.75 | 0.047 |
+**Finding:** monotonic — higher lr → lower train loss → higher test Spearman; lr=1e-5 (old) was UNDER-trained. Cosine decayed lr→0 (hurt). Best=3e-5 (0.134), trend not peaked → Round 2 pushes lr higher. (Train-eval crashed on a `M=batch_size//L=0` bug for the L=3397 train complex; fixed with max(1,...).)
