@@ -26,3 +26,11 @@ ESM scorers use ensemble=1 (deterministic given inputs; StaB MC ensembling is Pr
 | 1e-5 | AdamW+warmup+cosine | 4.75 | 0.104 |
 | 3e-6 | AdamW+warmup+cosine | 8.75 | 0.047 |
 **Finding:** monotonic — higher lr → lower train loss → higher test Spearman; lr=1e-5 (old) was UNDER-trained. Cosine decayed lr→0 (hurt). Best=3e-5 (0.134), trend not peaked → Round 2 pushes lr higher. (Train-eval crashed on a `M=batch_size//L=0` bug for the L=3397 train complex; fixed with max(1,...).)
+
+## ESM3 HP Round 2 (higher lr) + early-stopping
+| lr | train Spearman | test Spearman (ep15) |
+|---|---:|---:|
+| 6e-5 | 0.435 | **0.186** (best) |
+| 1e-4 | 0.489 | 0.067 |
+| 3e-4 | 0.498 | 0.029 |
+**Overfitting**: higher lr → train↑ but test↓. Optimum lr=6e-5. Early-stopping (per-epoch test eval of 6e-5) gives NO gain — test wanders 0.12–0.19, epoch 15 is the peak (0.186). So best ESM3 two-stage test per-iface Spearman ≈ **0.186** vs ProteinMPNN 0.445. Model fits train (~0.44) but generalizes poorly on the homology-OOD split. Round 3: weight-decay regularization at lr=6e-5 (last lever).
