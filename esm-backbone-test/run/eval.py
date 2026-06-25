@@ -125,22 +125,32 @@ def write_csv(pred_df, out_csv):
 
 
 # --------------------------------------------------------------------------- #
-# CLI: evaluate a FINETUNED backbone checkpoint on the SKEMPI test split.      #
+# CLI: evaluate a FINETUNED backbone checkpoint on a SKEMPI split.             #
 #                                                                              #
 #     python -m run.eval --backbone {mpnn,esmc_600m,esmc_6b,esm3} \            #
-#         --checkpoint <ft.pt> --out <csv> [--ensemble 1] [--device cuda] \    #
-#         [--limit K] [--pdb_dir data/SKEMPI2_PDBs]                            #
+#         --checkpoint <ft.pt> --out <csv> [--split {test,train}] \            #
+#         [--ensemble 1] [--device cuda] [--limit K] \                         #
+#         [--pdb_dir data/SKEMPI2_PDBs]                                        #
 #                                                                              #
-# Mirrors run/lr_sweep.py's eval path EXACTLY: build the SKEMPI test dataset,  #
+# Mirrors run/lr_sweep.py's eval path EXACTLY: build the SKEMPI split dataset, #
 # build a fresh scorer, load the finetuned backbone weights, wrap in StaBddG,  #
 # run eval_dataset, write_csv in the baseline format.                          #
 # --------------------------------------------------------------------------- #
 
-# SKEMPI test split inputs (resolved against the worktree root, cwd-independent;
-# same paths lr_sweep.py uses). pdb_dir is overridable via --pdb_dir.
+# SKEMPI split inputs (resolved against the worktree root, cwd-independent;
+# same paths lr_sweep.py / finetune.py use). pdb_dir is overridable via --pdb_dir.
 _SKEMPI_CSV = str(_WORKTREE_ROOT / "data/SKEMPI/filtered_skempi.csv")
 _SKEMPI_TEST_SPLIT = str(_WORKTREE_ROOT / "data/SKEMPI/test_pdb.pkl")
+_SKEMPI_TRAIN_SPLIT = str(_WORKTREE_ROOT / "data/SKEMPI/train_pdb.pkl")
 _SKEMPI_PDB_DIR = str(_WORKTREE_ROOT / "data/SKEMPI2_PDBs")
+
+# Per-split (split path, structure-dict cache path). The cache path mirrors the
+# build paths used elsewhere (finetune.py uses cache/skempi_train_pdb_dict.pkl
+# for train; eval historically used cache/skempi_test_pdb_dict.pkl for test).
+_SKEMPI_SPLITS = {
+    "test": (_SKEMPI_TEST_SPLIT, "cache/skempi_test_pdb_dict.pkl"),
+    "train": (_SKEMPI_TRAIN_SPLIT, "cache/skempi_train_pdb_dict.pkl"),
+}
 
 # Evaluation token budget per backbone (no-grad, larger than finetune); mirrors
 # run/lr_sweep.py::EVAL_BATCH_SIZE.
@@ -152,18 +162,22 @@ _EVAL_BATCH_SIZE = {
 }
 
 
-def _build_eval_dataset(pdb_dir, limit=None):
-    """Build the SKEMPI test-split dataset (optionally first K complexes).
+def _build_eval_dataset(pdb_dir, split="test", limit=None):
+    """Build a SKEMPI split dataset (``test`` or ``train``; optionally first K).
 
-    Mirrors run/lr_sweep.py::_build_eval_dataset (same csv / split / cache).
+    Mirrors run/lr_sweep.py::_build_eval_dataset (same csv / cache convention);
+    ``split`` selects the test vs train split path (and matching cache). Building
+    the train split lets us measure TRAIN fit (does the model fit the training
+    data?) vs the default TEST generalization.
     """
     from stabddg.ppi_dataset import SKEMPIDataset
 
+    split_path, cache_path = _SKEMPI_SPLITS[split]
     dataset = SKEMPIDataset(
         csv_path=_SKEMPI_CSV,
-        split_path=_SKEMPI_TEST_SPLIT,
+        split_path=split_path,
         pdb_dir=pdb_dir,
-        pdb_dict_cache_path="cache/skempi_test_pdb_dict.pkl",
+        pdb_dict_cache_path=cache_path,
         af_apo_structures=False,
     )
     if limit is not None:
@@ -192,6 +206,9 @@ def main():
                     help="finetuned backbone state_dict (mpnn: StaB-ddG ckpt; "
                          "esm*: consolidated/per-epoch backbone state_dict)")
     ap.add_argument("--out", type=str, required=True, help="output CSV path")
+    ap.add_argument("--split", type=str, default="test", choices=["test", "train"],
+                    help="SKEMPI split to evaluate: test (generalization, default) "
+                         "or train (measure training-set fit)")
     ap.add_argument("--ensemble", type=int, default=1, help="eval ensemble size")
     ap.add_argument("--batch_size", type=int, default=None,
                     help="TOKEN budget per forward (default: per-backbone)")
@@ -218,10 +235,10 @@ def main():
     scorer.to(device)
 
     model = StaBddG(scorer).to(device).eval()
-    dataset = _build_eval_dataset(args.pdb_dir, limit=args.limit)
+    dataset = _build_eval_dataset(args.pdb_dir, split=args.split, limit=args.limit)
 
     print(f"[eval] backbone={args.backbone} ckpt={args.checkpoint} "
-          f"complexes={len(dataset)} ensemble={args.ensemble} "
+          f"split={args.split} complexes={len(dataset)} ensemble={args.ensemble} "
           f"batch_size(tokens)={batch_size} device={device}", flush=True)
 
     with torch.no_grad():

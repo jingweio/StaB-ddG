@@ -79,6 +79,7 @@ allocator fragmentation under the large, variable-size training activations.
 
 import argparse
 import datetime
+import math
 import os
 import sys
 from pathlib import Path
@@ -134,6 +135,72 @@ _STAB_ALPHABET = "ACDEFGHIKLMNPQRSTVWYX"
 # docstring. ESM-C training OOMs at the eval budget of 10000; ESM3 attention is
 # O(B*L^2). MPNN is tiny and keeps the original recipe's 10000.
 DEFAULT_BATCH_SIZE = {"mpnn": 10000, "esmc_600m": 2000, "esmc_6b": 2000, "esm3": 500}
+
+
+# --------------------------------------------------------------------------- #
+# Large-model full-finetune recipe: optimizer + LR schedule helpers.          #
+#                                                                              #
+# These are DEFAULTS-PRESERVING. At the original defaults                      #
+# (--optimizer adam, --weight_decay 0.0, --warmup_frac 0.0,                    #
+# --lr_schedule constant) ``_build_optimizer`` returns exactly the previous    #
+# ``torch.optim.Adam(params, lr=args.lr)`` and ``_build_scheduler`` returns a  #
+# LambdaLR whose multiplier is a CONSTANT 1.0 for every step — so the loss     #
+# path / LR trajectory is bit-for-bit identical to the old loop (verified by   #
+# the 2-step defaults check). AdamW / weight_decay / warmup / cosine only      #
+# engage when explicitly requested.                                            #
+# --------------------------------------------------------------------------- #
+def _build_optimizer(params, args):
+    """Adam (default) or AdamW with weight decay, on the backbone parameters.
+
+    At defaults (optimizer=adam, weight_decay=0.0) this is identical to the
+    original ``torch.optim.Adam(params, lr=args.lr)``.
+    """
+    if args.optimizer == "adamw":
+        return torch.optim.AdamW(params, lr=args.lr, weight_decay=args.weight_decay)
+    return torch.optim.Adam(params, lr=args.lr)
+
+
+def _estimate_total_steps(args, *, complex_lengths_and_counts):
+    """Estimate total optimizer steps = epochs * (per-epoch chunk count).
+
+    ``complex_lengths_and_counts`` is an iterable of ``(L, N)`` per domain/complex
+    where ``L`` is the per-row sequence length used for the token-budget split and
+    ``N`` is the number of mutant rows. Per the inner loops, each domain/complex
+    contributes ``ceil(N / M)`` steps with ``M = max(1, batch_size // L)``.
+    """
+    per_epoch = 0
+    for L, N in complex_lengths_and_counts:
+        if N <= 0:
+            continue
+        M = max(1, args.batch_size // max(1, L))
+        per_epoch += math.ceil(N / M)
+    return max(1, args.epochs * per_epoch)
+
+
+def _build_scheduler(optimizer, args, total_steps):
+    """LambdaLR: linear warmup over ``warmup_frac*total_steps`` then constant or
+    cosine decay to ~0 over the remainder.
+
+    At defaults (warmup_frac=0.0, lr_schedule=constant) the multiplier is a
+    CONSTANT 1.0 at every step, so ``scheduler.step()`` is a no-op on the LR —
+    bit-for-bit identical to having no scheduler at all.
+    """
+    warmup_steps = int(args.warmup_frac * total_steps)
+
+    def lr_lambda(step):
+        # step is the number of completed scheduler.step() calls (0-indexed).
+        if warmup_steps > 0 and step < warmup_steps:
+            # Linear warmup from ~0 up to 1.0 (peak LR) at the end of warmup.
+            return float(step + 1) / float(warmup_steps)
+        if args.lr_schedule == "cosine":
+            denom = max(1, total_steps - warmup_steps)
+            progress = float(step - warmup_steps) / float(denom)
+            progress = min(1.0, max(0.0, progress))
+            return 0.5 * (1.0 + math.cos(math.pi * progress))
+        # constant
+        return 1.0
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
 def build_train_dataset(pdb_dict_cache_path, limit=None):
@@ -259,7 +326,18 @@ def finetune(model, train_dataset, args, device):
     """
     backbone = model.scorer.backbone_module
 
-    optimizer = torch.optim.Adam(backbone.parameters(), lr=args.lr)
+    optimizer = _build_optimizer(backbone.parameters(), args)
+    # total_steps = epochs * sum over complexes of ceil(N_muts / M); used for the
+    # warmup / cosine schedule. At defaults the schedule multiplier is a constant
+    # 1.0, so this estimate has no effect on the LR.
+    total_steps = _estimate_total_steps(
+        args,
+        complex_lengths_and_counts=(
+            (s["complex_mut_seqs"].shape[1], s["complex_mut_seqs"].shape[0])
+            for s in train_dataset
+        ),
+    )
+    scheduler = _build_scheduler(optimizer, args, total_steps)
     ddG_loss_fn = torch.nn.MSELoss()
 
     backbone.train()
@@ -268,8 +346,11 @@ def finetune(model, train_dataset, args, device):
     os.makedirs(args.out, exist_ok=True)
     log_path = os.path.join(args.out, f"{args.run_name}_train_log.csv")
     with open(log_path, "w") as lf:
-        lf.write("timestamp,epoch,mean_loss\n")
+        lf.write("timestamp,epoch,mean_loss,lr\n")
     print(f"[train log] per-epoch mean loss -> {log_path}", flush=True)
+    print(f"[sched] optimizer={args.optimizer} weight_decay={args.weight_decay} "
+          f"warmup_frac={args.warmup_frac} lr_schedule={args.lr_schedule} "
+          f"total_steps~={total_steps}", flush=True)
 
     for epoch in range(args.epochs):
         epoch_losses = []
@@ -301,6 +382,7 @@ def finetune(model, train_dataset, args, device):
                     loss = ddG_loss_fn(pred, ddG[i:i + B])
                     loss.backward()
                     optimizer.step()
+                    scheduler.step()
                     optimizer.zero_grad()
                     epoch_losses.append(loss.item())
             except Exception as e:
@@ -315,11 +397,12 @@ def finetune(model, train_dataset, args, device):
                     torch.cuda.empty_cache()
 
         mean_loss = (sum(epoch_losses) / len(epoch_losses)) if epoch_losses else float("nan")
-        print(f"[epoch {epoch + 1}/{args.epochs}] mean train loss = {mean_loss:.6f}",
-              flush=True)
+        cur_lr = optimizer.param_groups[0]["lr"]
+        print(f"[epoch {epoch + 1}/{args.epochs}] mean train loss = {mean_loss:.6f} "
+              f"lr = {cur_lr:.3e}", flush=True)
         with open(log_path, "a") as lf:
             lf.write(f"{datetime.datetime.now().isoformat(timespec='seconds')},"
-                     f"{epoch + 1},{mean_loss:.6f}\n")
+                     f"{epoch + 1},{mean_loss:.6f},{cur_lr:.6e}\n")
 
         ckpt_path = os.path.join(args.out, f"{args.run_name}_{epoch + 1}.pt")
         torch.save(backbone.state_dict(), ckpt_path)
@@ -338,7 +421,24 @@ def finetune_stability(scorer, dataset_train, ddG_data, args, device):
     """
     backbone = scorer.backbone_module
 
-    optimizer = torch.optim.Adam(backbone.parameters(), lr=args.lr)
+    optimizer = _build_optimizer(backbone.parameters(), args)
+    # total_steps = epochs * sum over domains of ceil(N_muts / M). Domains map to
+    # ddG_data[f'{name}.pdb']['mut_seqs'] (shape [N, L]); domains absent from
+    # ddG_data (or with N==0) contribute 0 steps, matching the inner loop.
+    def _stability_lengths_and_counts():
+        for s in dataset_train:
+            entry = ddG_data.get(f"{s['name']}.pdb")
+            if entry is None:
+                continue
+            ms = entry["mut_seqs"]
+            if ms.shape[0] == 0:
+                continue
+            yield ms.shape[1], ms.shape[0]
+
+    total_steps = _estimate_total_steps(
+        args, complex_lengths_and_counts=_stability_lengths_and_counts()
+    )
+    scheduler = _build_scheduler(optimizer, args, total_steps)
     ddG_loss_fn = torch.nn.MSELoss()
 
     backbone.train()
@@ -347,8 +447,11 @@ def finetune_stability(scorer, dataset_train, ddG_data, args, device):
     os.makedirs(args.out, exist_ok=True)
     log_path = os.path.join(args.out, f"{args.run_name}_train_log.csv")
     with open(log_path, "w") as lf:
-        lf.write("timestamp,epoch,mean_loss\n")
+        lf.write("timestamp,epoch,mean_loss,lr\n")
     print(f"[train log] per-epoch mean loss -> {log_path}", flush=True)
+    print(f"[sched] optimizer={args.optimizer} weight_decay={args.weight_decay} "
+          f"warmup_frac={args.warmup_frac} lr_schedule={args.lr_schedule} "
+          f"total_steps~={total_steps}", flush=True)
 
     for epoch in range(args.epochs):
         epoch_losses = []
@@ -376,6 +479,7 @@ def finetune_stability(scorer, dataset_train, ddG_data, args, device):
                     loss = ddG_loss_fn(pred, ddG[i:i + B])
                     loss.backward()
                     optimizer.step()
+                    scheduler.step()
                     optimizer.zero_grad()
                     epoch_losses.append(loss.item())
             except Exception as e:
@@ -389,11 +493,12 @@ def finetune_stability(scorer, dataset_train, ddG_data, args, device):
                     torch.cuda.empty_cache()
 
         mean_loss = (sum(epoch_losses) / len(epoch_losses)) if epoch_losses else float("nan")
-        print(f"[epoch {epoch + 1}/{args.epochs}] mean train loss = {mean_loss:.6f}",
-              flush=True)
+        cur_lr = optimizer.param_groups[0]["lr"]
+        print(f"[epoch {epoch + 1}/{args.epochs}] mean train loss = {mean_loss:.6f} "
+              f"lr = {cur_lr:.3e}", flush=True)
         with open(log_path, "a") as lf:
             lf.write(f"{datetime.datetime.now().isoformat(timespec='seconds')},"
-                     f"{epoch + 1},{mean_loss:.6f}\n")
+                     f"{epoch + 1},{mean_loss:.6f},{cur_lr:.6e}\n")
 
         ckpt_path = os.path.join(args.out, f"{args.run_name}_{epoch + 1}.pt")
         torch.save(backbone.state_dict(), ckpt_path)
@@ -435,6 +540,19 @@ def main():
                          "(mpnn: StaB-ddG ckpt; esm*: backbone state_dict). "
                          "Chains stage-1 -> stage-2.")
     ap.add_argument("--lr", type=float, default=1e-5)
+    # Large-model full-FT recipe options. Defaults preserve the original behavior
+    # (Adam, no weight decay, no warmup, constant LR).
+    ap.add_argument("--optimizer", default="adam", choices=["adam", "adamw"],
+                    help="adam (default, original behavior) or adamw (decoupled "
+                         "weight decay)")
+    ap.add_argument("--weight_decay", type=float, default=0.0,
+                    help="weight decay (only meaningful with --optimizer adamw)")
+    ap.add_argument("--warmup_frac", type=float, default=0.0,
+                    help="fraction of total optimizer steps used for linear LR "
+                         "warmup (0.0 = no warmup, original behavior)")
+    ap.add_argument("--lr_schedule", default="constant", choices=["constant", "cosine"],
+                    help="LR schedule after warmup: constant (default) or cosine "
+                         "decay to ~0")
     ap.add_argument("--epochs", type=int, required=True)
     ap.add_argument("--batch_size", type=int, default=None,
                     help="TOKEN budget per forward batch "
