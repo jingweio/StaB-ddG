@@ -241,8 +241,20 @@ bf16 梯度        12 GB
     <tr><td>训练每样本 ~6 次骨干前向(3 子系统×wt/mut);MC ensemble 仅推理期</td><td><span class="pill nu">NUANCE</span></td></tr>
   </table>
 
+  <h2>13 · 结果与结论(2026-06-26,ESM3 track)</h2>
+  <div class="warnbox"><b>结论:在 OOD PPI ΔΔG 上,ESM3 替换 ProteinMPNN 不划算。</b> 充分调参 + Megascale 预训练把 ESM3 从 0.086 提到 <b>0.242</b>(证明初版确为欠训,已修复),但仍显著低于 ProteinMPNN 的 <b>0.445</b>。ESM3 能拟合训练集(train Spearman ~0.57)却只泛化到 ~0.24 → 瓶颈是 <b>OOD 泛化</b>,非训练。小而专精的 inverse-folding 网络在该任务上泛化远胜大而通用的 ESM3-via-StaB。</div>
+  <table>
+    <tr><th>配置</th><th>per-interface Spearman (SKEMPI OOD test)</th></tr>
+    <tr><td><b>ProteinMPNN 两阶段(基线)</b></td><td><b>0.445</b></td></tr>
+    <tr><td class="tA"><b>ESM3 两阶段,调优(lr=6e-5, AdamW wd=0.05, 15ep)</b></td><td><b>0.242</b></td></tr>
+    <tr><td>ESM3 仅 SKEMPI(去掉 Megascale,同配置)</td><td>0.148 <span class="muted">→ Stage-1 贡献 +0.094</span></td></tr>
+    <tr><td>ESM3 zero-shot</td><td>0.086</td></tr>
+    <tr><td>ESMC-6B zero-shot(该 track 已暂停)</td><td>0.014</td></tr>
+  </table>
+  <p><b>超参全扫描(已排除"欠训")</b>:lr {1e-6…3e-4} × wd {0…0.1} × {Adam,AdamW} × {constant,cosine,warmup} × {15,30 ep} + 逐 epoch early-stopping;最优在 lr=6e-5/wd=0.05/15ep 处平台化。<b>Megascale Stage-1(折叠稳定性预训练)确有价值</b>:使单阶段 0.148 → 两阶段 0.242。对比图见 <code>results/comparison.png</code>;明细见 <code>results/RESULTS.md</code>。</p>
+
   <footer>
-    StaB-ddG ESM-backbone 实验 · 设计文档 v1 · 2026-06-23 ·
+    StaB-ddG ESM-backbone 实验 · 设计 v1 (2026-06-23) + 结果 (2026-06-26) ·
     分支 <span class="kbd">esm-replace</span>(StaB-ddG)/ <span class="kbd">reproduce</span>(esm)·
     技术论断经多 agent 代码核验。下一步:writing-plans 出实现计划。
   </footer>
