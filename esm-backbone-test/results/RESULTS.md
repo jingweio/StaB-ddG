@@ -34,3 +34,11 @@ ESM scorers use ensemble=1 (deterministic given inputs; StaB MC ensembling is Pr
 | 1e-4 | 0.489 | 0.067 |
 | 3e-4 | 0.498 | 0.029 |
 **Overfitting**: higher lr → train↑ but test↓. Optimum lr=6e-5. Early-stopping (per-epoch test eval of 6e-5) gives NO gain — test wanders 0.12–0.19, epoch 15 is the peak (0.186). So best ESM3 two-stage test per-iface Spearman ≈ **0.186** vs ProteinMPNN 0.445. Model fits train (~0.44) but generalizes poorly on the homology-OOD split. Round 3: weight-decay regularization at lr=6e-5 (last lever).
+
+## ESM3 HP Round 3 (weight decay @ lr=6e-5) — wd HELPS
+| lr | wd | train Spearman | test Spearman |
+|---|---|---:|---:|
+| 6e-5 | 0 | 0.435 | 0.186 |
+| 6e-5 | 0.05 | 0.565 | **0.242** (new best) |
+| 6e-5 | 0.1 | 0.567 | 0.157 (over-reg) |
+wd=0.05 raised BOTH train(0.44→0.57) and test(0.19→0.24) → better optimization. Trajectory still climbing (0.075→0.134→0.186→0.242). Round 4: map wd∈{0.02,0.03} + lr1e4+wd + more epochs to find the ceiling.
