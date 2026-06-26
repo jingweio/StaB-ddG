@@ -55,3 +55,16 @@ wd=0.05 raised BOTH train(0.44→0.57) and test(0.19→0.24) → better optimiza
 
 ### CONCLUSION (ESM3, reliable after thorough HP sweep)
 Swept lr {1e-6…3e-4} × wd {0…0.1} × optimizer {Adam,AdamW} × schedule {constant,cosine,warmup} × epochs {15,30} + per-epoch early-stopping. **ESM3 two-stage optimum: lr=6e-5, AdamW wd=0.05, 15 ep → test per-interface Spearman = 0.242** (train 0.565). The naive lr=1e-5 run (0.104) was indeed UNDER-TUNED — proper tuning more than doubled it (0.104→0.242). **But the optimum (0.242) is still far below ProteinMPNN's 0.445.** ESM3 fits train well (~0.57) yet generalizes to only ~0.24 on the homology-OOD test → the bottleneck is **OOD generalization**, not training. A small specialized inverse-folding net (ProteinMPNN) generalizes far better on OOD PPI ΔΔG than the large general-purpose ESM3 via the StaB identity. (Pending: from-pretrained ablation = does Megascale Stage-1 help?)
+
+## Ablation: does Megascale Stage-1 help? — YES
+ESM3 best config (lr=6e-5, AdamW wd=0.05, 15ep), from PRETRAINED (no Stage-1) → test per-iface Spearman **0.148**, vs two-stage (with Stage-1) **0.242**. → Megascale folding-stability Stage-1 adds **+0.094** (nearly doubles the single-stage gain over zero-shot 0.086). The two-stage design IS valuable.
+
+## FINAL SUMMARY (ESM3 track)
+| config | per-interface Spearman |
+|---|---:|
+| ProteinMPNN two-stage (baseline) | **0.445** |
+| **ESM3 two-stage, tuned (lr6e-5/AdamW wd0.05/15ep)** | **0.242** |
+| ESM3 SKEMPI-only, tuned (no Megascale) | 0.148 |
+| ESM3 zero-shot | 0.086 |
+| ESMC-6B zero-shot (track paused) | 0.014 |
+**Verdict:** Proper HP tuning + Megascale pretraining take ESM3 from 0.086 → 0.242 (under-tuning was real and fixed), but ESM3 still generalizes far worse on the homology-OOD split than the small specialized ProteinMPNN (0.242 vs 0.445). Bottleneck = OOD generalization (ESM3 train Spearman ~0.57 vs test ~0.24), not training.
