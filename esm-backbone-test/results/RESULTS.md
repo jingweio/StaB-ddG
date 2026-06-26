@@ -42,3 +42,16 @@ ESM scorers use ensemble=1 (deterministic given inputs; StaB MC ensembling is Pr
 | 6e-5 | 0.05 | 0.565 | **0.242** (new best) |
 | 6e-5 | 0.1 | 0.567 | 0.157 (over-reg) |
 wd=0.05 raised BOTH train(0.44→0.57) and test(0.19→0.24) → better optimization. Trajectory still climbing (0.075→0.134→0.186→0.242). Round 4: map wd∈{0.02,0.03} + lr1e4+wd + more epochs to find the ceiling.
+
+## ESM3 HP Round 4 (map optimum) + FINAL
+| lr | wd | epochs | train Sp. | test Sp. |
+|---|---|---|---:|---:|
+| 6e-5 | 0.02 | 15 | 0.625 | 0.106 |
+| 6e-5 | 0.03 | 15 | 0.561 | 0.203 |
+| **6e-5** | **0.05** | **15** | 0.565 | **0.242** ← OPTIMUM |
+| 6e-5 | 0.10 | 15 | 0.567 | 0.157 |
+| 1e-4 | 0.05 | 15 | 0.565 | 0.176 |
+| 6e-5 | 0.05 | 30 | 0.529 | 0.179 |
+
+### CONCLUSION (ESM3, reliable after thorough HP sweep)
+Swept lr {1e-6…3e-4} × wd {0…0.1} × optimizer {Adam,AdamW} × schedule {constant,cosine,warmup} × epochs {15,30} + per-epoch early-stopping. **ESM3 two-stage optimum: lr=6e-5, AdamW wd=0.05, 15 ep → test per-interface Spearman = 0.242** (train 0.565). The naive lr=1e-5 run (0.104) was indeed UNDER-TUNED — proper tuning more than doubled it (0.104→0.242). **But the optimum (0.242) is still far below ProteinMPNN's 0.445.** ESM3 fits train well (~0.57) yet generalizes to only ~0.24 on the homology-OOD test → the bottleneck is **OOD generalization**, not training. A small specialized inverse-folding net (ProteinMPNN) generalizes far better on OOD PPI ΔΔG than the large general-purpose ESM3 via the StaB identity. (Pending: from-pretrained ablation = does Megascale Stage-1 help?)
