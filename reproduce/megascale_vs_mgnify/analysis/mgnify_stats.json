@@ -1,0 +1,107 @@
+{
+  "concat_n_rows": 2287291,
+  "concat_n_unique_aa_seq": 2262422,
+  "lib_counts": {
+    "dms7": 899998,
+    "dms4": 813652,
+    "dms5": 573641
+  },
+  "mgnify_flag": {
+    "True": 1881441,
+    "False": 405850
+  },
+  "dm_design_flag": {
+    "False": 2182931,
+    "True": 104360
+  },
+  "split_counts": {
+    "nan": 1304503,
+    "train": 977087,
+    "test": 3322,
+    "validation": 1782,
+    "validation_online": 597
+  },
+  "name_prefixes_top": {
+    "rocklin_batch2_": 815635,
+    "rocklin_batch3_essential_": 530785,
+    "design_id_": 65881,
+    "rocklin_batch3_additional_": 42856,
+    "rocklin_design_batch1_": 7600,
+    "villintile2_": 44,
+    "villintile_": 44,
+    "rocklin_batch2_326805_delA": 13,
+    "rocklin_batch2_306943_delE": 12,
+    "rocklin_batch2_121392_delA": 12,
+    "rocklin_batch2_558281_delA": 11,
+    "rocklin_batch2_539848_delE": 10
+  },
+  "len": {
+    "min": 43,
+    "max": 80,
+    "mean": 70.8,
+    "median": 71.0,
+    "p05": 61.0,
+    "p95": 80.0
+  },
+  "dG": {
+    "n": 2287291,
+    "min": -7.07,
+    "max": 11.11,
+    "mean": 1.46,
+    "median": 1.5,
+    "p05": -2.32,
+    "p95": 4.63,
+    "frac_negative": 0.191
+  },
+  "idx_n_rows": 965856,
+  "idx_cols": [
+    "name",
+    "split",
+    "seq",
+    "dG",
+    "PDB_name"
+  ],
+  "idx_n_unique_PDB_name": 532988,
+  "idx_n_unique_seq": 965856,
+  "idx_split_counts": {
+    "train": 960216,
+    "test": 3283,
+    "validation": 1761,
+    "validation_online": 596
+  },
+  "seqs_per_PDB_name": {
+    "mean": 1.81,
+    "median": 1.0,
+    "min": 1,
+    "max": 4,
+    "frac_singletons": 0.679,
+    "frac_le2": 0.69,
+    "frac_ge100": 0.0,
+    "frac_ge500": 0.0
+  },
+  "top_PDB_name_counts": {
+    "rocklin_batch2_10000": 4,
+    "rocklin_batch2_100001": 4,
+    "rocklin_batch2_99994": 4,
+    "rocklin_batch2_99993": 4,
+    "rocklin_batch2_100006": 4,
+    "rocklin_batch2_99963": 4,
+    "rocklin_batch2_99959": 4,
+    "rocklin_batch2_302194": 4
+  },
+  "example_big_group": {
+    "PDB_name": "rocklin_batch2_10000",
+    "n": 4,
+    "name_examples": [
+      "rocklin_batch2_10000",
+      "rocklin_batch2_10000_mutant1",
+      "rocklin_batch2_10000_mutant2",
+      "rocklin_batch2_10000_mutant3"
+    ],
+    "seq_len_range": [
+      75,
+      75
+    ],
+    "n_unique_seq": 4
+  }
+}

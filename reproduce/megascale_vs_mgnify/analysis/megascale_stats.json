@@ -1,0 +1,48 @@
+{
+  "n_rows": 776298,
+  "n_WT_domains": 479,
+  "n_WT_clusters": 133,
+  "variant_type_counts": {
+    "single_sub": 487914,
+    "multi_sub": 210118,
+    "insertion": 50643,
+    "deletion": 25275,
+    "wt": 2348
+  },
+  "wt_len": {
+    "min": 32,
+    "max": 74,
+    "mean": 54.1,
+    "median": 56.0
+  },
+  "all_len": {
+    "min": 31,
+    "max": 75,
+    "mean": 57.0,
+    "median": 58.0
+  },
+  "dG": {
+    "n": 776298,
+    "min": -15.28,
+    "max": 16.58,
+    "mean": 1.78,
+    "median": 1.75,
+    "p05": -1.85,
+    "p95": 5.11
+  },
+  "variants_per_WT": {
+    "mean": 1615.8,
+    "median": 1324.0,
+    "min": 404,
+    "max": 9032
+  },
+  "single_sub_saturation": {
+    "n_domains_with_singles": 478,
+    "mean_fraction_of_19L_covered": 0.991,
+    "median_fraction": 0.999,
+    "frac_domains_over_80pct": 0.998,
+    "mean_positions_mutated_fraction_of_L": 1.0,
+    "median_positions_fraction": 1.0
+  },
+  "avg_subs_per_position": 18.87
+}
