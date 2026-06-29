@@ -16,6 +16,7 @@ mega_len    = np.load(f"{D}/mega_wt_len.npy")
 mg_dG       = np.load(f"{D}/mgnify_dG.npy")
 mg_len      = np.load(f"{D}/mgnify_len.npy")
 mg_per      = np.load(f"{D}/mgnify_per_pdb.npy")
+mg_indel    = np.load(f"{D}/mgnify_indel_per_base.npy")
 
 MEGA_C="#E4572E"   # orange-red
 MG_C="#C42D6B"     # magenta (paper palette)
@@ -93,3 +94,44 @@ ax[1].legend(fontsize=9)
 fig.tight_layout()
 fig.savefig(f"{OUT}/fig2_distributions.png", bbox_inches="tight")
 print("saved fig2_distributions.png")
+
+# ----------------------------------------------------------------------------
+# Figure 3: Mutation-scanning DEPTH — the two flavours
+# ----------------------------------------------------------------------------
+fig,ax=plt.subplots(1,3,figsize=(14,4.2))
+
+# (a) MGnify: how many measurements each WT domain receives (substitution depth)
+hist={1:361635,2:6238,3:68715,4:96400}
+xs=list(hist.keys()); ys=list(hist.values())
+bars=ax[0].bar(xs, ys, color=MG_C, alpha=0.8, width=0.65)
+ax[0].set_yscale("log"); ax[0].set_ylim(1e3,1e6)
+ax[0].set_xticks(xs); ax[0].set_xlabel("measurements per WT domain\n(WT + its substitution mutants)")
+ax[0].set_ylabel("number of WT domains (log)")
+ax[0].set_title("(a) MGnify: substitution depth is shallow", fontsize=11, loc="left")
+for b,y in zip(bars,ys):
+    ax[0].text(b.get_x()+b.get_width()/2, y*1.15, f"{y:,}", ha="center", fontsize=8)
+ax[0].text(2.5, 4e5, "67.9% of domains\nhave ONLY the WT\n(no mutant at all)", fontsize=9,
+           color=MG_C, ha="center", va="top")
+
+# (b) single-substitution site-saturation: Megascale vs MGnify
+sat=[99.1, 0.09]
+b=ax[1].bar([0,1], sat, color=[MEGA_C,MG_C], alpha=0.8, width=0.6)
+ax[1].set_ylim(0,108); ax[1].set_xticks([0,1]); ax[1].set_xticklabels(["Megascale","MGnify"])
+ax[1].set_ylabel("single-substitution site-saturation\n(% of 19·L measured per domain)")
+ax[1].set_title("(b) Substitution saturation: 99% vs ~0%", fontsize=11, loc="left")
+ax[1].text(0, 101, "99.1%", ha="center", fontsize=11, color=MEGA_C, fontweight="bold")
+ax[1].text(1, 6,  "≈0.09%\n(~1 sub / domain)", ha="center", fontsize=9, color=MG_C, fontweight="bold")
+ax[1].text(0, 58, "every position,\n~18.9/19 subs\n(479 domains)", ha="center",
+           fontsize=8.5, color="white", fontweight="bold")
+
+# (c) MGnify indels ARE deep — but only on a tiny subset of domains
+ax[2].hist(mg_indel, bins=np.arange(43,52), color="#7B2D8E", alpha=0.8, rwidth=0.9)
+ax[2].set_xlabel("indel variants per scanned domain")
+ax[2].set_ylabel("number of domains")
+ax[2].set_title("(c) MGnify indels: deep, but narrow", fontsize=11, loc="left")
+ax[2].text(0.5,0.95,f"only {len(mg_indel):,} domains got indels\n"
+           f"(~0.9% of all), but each was\nnear-saturation scanned\n(~49 indels/domain)",
+           transform=ax[2].transAxes, fontsize=9, va="top", ha="left", color="#7B2D8E")
+fig.tight_layout()
+fig.savefig(f"{OUT}/fig3_mutation_depth.png", bbox_inches="tight")
+print("saved fig3_mutation_depth.png")

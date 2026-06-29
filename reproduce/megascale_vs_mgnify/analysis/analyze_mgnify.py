@@ -23,6 +23,18 @@ res["split_counts"]={str(k):int(v) for k,v in df["split"].value_counts(dropna=Fa
 # name prefixes
 df["prefix"]=df["name"].astype(str).str.replace(r"\d+$","",regex=True)
 res["name_prefixes_top"]={str(k):int(v) for k,v in df["prefix"].value_counts().head(12).items()}
+
+# indel scanning depth: group indel variants by their base (WT) domain id
+nm=df["name"].astype(str)
+ind=nm[nm.str.contains(r"_ins|_del",regex=True)]
+ibase=ind.str.replace(r"_(ins|del)[A-Z]\d+$","",regex=True)
+gi=ibase.value_counts()
+res["indel_scan"]={"n_base_domains_with_indels":int(gi.size),
+                   "total_indel_measurements":int(len(ind)),
+                   "indels_per_scanned_domain_mean":round(float(gi.mean()),1),
+                   "indels_per_scanned_domain_median":float(gi.median()),
+                   "min":int(gi.min()),"max":int(gi.max())}
+np.save("/tmp/claude-224072/mgnify_indel_per_base.npy", gi.values)
 L=df["L"].dropna()
 res["len"]={"min":int(L.min()),"max":int(L.max()),"mean":round(float(L.mean()),1),"median":float(L.median()),
             "p05":float(L.quantile(.05)),"p95":float(L.quantile(.95))}
@@ -50,6 +62,11 @@ res["seqs_per_PDB_name"]={"mean":round(float(per.mean()),2),"median":float(per.m
                           "frac_ge100":round(float((per>=100).mean()),3),
                           "frac_ge500":round(float((per>=500).mean()),3)}
 np.save("/tmp/claude-224072/mgnify_per_pdb.npy", per.values)
+# exact per-WT depth histogram (how many measurements each WT domain has)
+vc=per.value_counts().sort_index()
+res["per_WT_depth_hist"]={int(k):int(v) for k,v in vc.items()}
+res["frac_only_WT"]=round(float((per==1).mean()),3)
+res["n_WT_with_any_mutant"]=int((per>=2).sum())
 # is PDB_name a WT-domain id or per-sequence id? sample a high-count group
 top=per.sort_values(ascending=False)
 res["top_PDB_name_counts"]={str(k):int(v) for k,v in top.head(8).items()}

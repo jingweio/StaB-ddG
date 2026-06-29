@@ -35,6 +35,14 @@
     "rocklin_batch2_558281_delA": 11,
     "rocklin_batch2_539848_delE": 10
   },
+  "indel_scan": {
+    "n_base_domains_with_indels": 6000,
+    "total_indel_measurements": 295607,
+    "indels_per_scanned_domain_mean": 49.3,
+    "indels_per_scanned_domain_median": 49.0,
+    "min": 44,
+    "max": 50
+  },
   "len": {
     "min": 43,
     "max": 80,
@@ -79,6 +87,14 @@
     "frac_ge100": 0.0,
     "frac_ge500": 0.0
   },
+  "per_WT_depth_hist": {
+    "1": 361635,
+    "2": 6238,
+    "3": 68715,
+    "4": 96400
+  },
+  "frac_only_WT": 0.679,
+  "n_WT_with_any_mutant": 171353,
   "top_PDB_name_counts": {
     "rocklin_batch2_10000": 4,
     "rocklin_batch2_100001": 4,
