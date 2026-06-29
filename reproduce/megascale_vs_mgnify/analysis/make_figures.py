@@ -114,13 +114,13 @@ ax[0].text(2.5, 4e5, "67.9% of domains\nhave ONLY the WT\n(no mutant at all)", f
            color=MG_C, ha="center", va="top")
 
 # (b) single-substitution site-saturation: Megascale vs MGnify
-sat=[99.1, 0.09]
+sat=[99.1, 0.075]
 b=ax[1].bar([0,1], sat, color=[MEGA_C,MG_C], alpha=0.8, width=0.6)
 ax[1].set_ylim(0,108); ax[1].set_xticks([0,1]); ax[1].set_xticklabels(["Megascale","MGnify"])
 ax[1].set_ylabel("single-substitution site-saturation\n(% of 19·L measured per domain)")
 ax[1].set_title("(b) Substitution saturation: 99% vs ~0%", fontsize=11, loc="left")
 ax[1].text(0, 101, "99.1%", ha="center", fontsize=11, color=MEGA_C, fontweight="bold")
-ax[1].text(1, 6,  "≈0.09%\n(~1 sub / domain)", ha="center", fontsize=9, color=MG_C, fontweight="bold")
+ax[1].text(1, 6,  "≈0.07%\n(~1 sub ÷ 19·L)", ha="center", fontsize=9, color=MG_C, fontweight="bold")
 ax[1].text(0, 58, "every position,\n~18.9/19 subs\n(479 domains)", ha="center",
            fontsize=8.5, color="white", fontweight="bold")
 
