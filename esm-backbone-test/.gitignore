@@ -8,6 +8,11 @@ track_esmc/ckpts/
 *.csv.gz
 __pycache__/
 
+# local-gate + sweep run scratch (multi-GB: ckpts + dumped runs). Keep the loose
+# result/summary CSVs under results/, but never these per-run output directories.
+results/gate_*/
+results/sweep_*/
+
 # regression-test fixtures: keep the small dumped sample (one_complex.pkl),
 # but not the bulky parsed-structure cache used only to speed up rebuilds.
 tests/fixtures/skempi_test_pdb_dict.pkl
