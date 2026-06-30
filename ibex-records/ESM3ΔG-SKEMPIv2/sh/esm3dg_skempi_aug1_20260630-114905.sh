@@ -20,7 +20,7 @@ RUN=esm3dg_skempi_aug1
 echo "===== TASK1: ESM3ΔG -> SKEMPI (stage-2 only, LoRA fine-tune) ====="
 srun python -u finetune.py --stage skempi --lora_ckpt $LORA --split train \
   --lr 6e-5 --optimizer adamw --weight_decay 0.05 --epochs 15 \
-  --batch_tokens 4000 --max_batch 4 --seed 0 \
+  --batch_tokens 4000 --max_batch 4 --seed 0 --save_freq 5 \
   --out ../cache/$RUN.pt --run_name $RUN
 
 echo "===== EVAL on SKEMPI test ====="

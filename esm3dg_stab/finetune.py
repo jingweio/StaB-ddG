@@ -74,6 +74,7 @@ def main():
                     help="sample one batch of mutants per domain/epoch (needed for Megascale: ~1460 muts/domain)")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--save_freq", type=int, default=0, help="also save adapters every K epochs (0=only final)")
     ap.add_argument("--run_name", default="run")
     args = ap.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)
@@ -150,6 +151,8 @@ def main():
                     if np.isfinite(sp): sps.append(sp)
         print(f"  epoch {ep+1}/{args.epochs}  loss={np.mean(losses):.4f}  "
               f"train_spearman={np.mean(sps):.3f}  oom_skipped_complexes={oom}", flush=True)
+        if args.save_freq and (ep + 1) % args.save_freq == 0 and (ep + 1) < args.epochs:
+            save_adapters(scorer, args.out.replace(".pt", f"_ep{ep+1}.pt"))
 
     save_adapters(scorer, args.out)
     print(f"saved adapters -> {args.out}")
