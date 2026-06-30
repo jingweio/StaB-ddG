@@ -24,14 +24,15 @@
 - **SLURM:** a100 x1, `--time 24h`（Stage-1）, `--cpus-per-task 12`, `--mem 96G`。code+data 在 `/ibex/user/guoj0f/StaB-ddG/esm-replace`（per-branch path）。
 - **env:** `esm-backbone`（peft 0.19.1, transformers 5.12.1, torch 2.5.1+cu124）；HF cache `/ibex/user/guoj0f/repos/esm/.hf_cache`（esm3 biohub mirror），`HF_HUB_OFFLINE=1`。env python 直接调（conda activate non-login 不稳）。
 - **sbatch:** `ibex-records/esm-lora-replace/sh/megascale_stage1_esm3lora_20260630-135103.sh`
-- **job ids:** smoke `47894361` (DONE); Stage-1 full `<TBD>`; Stage-2 `<TBD>`; eval `<TBD>`; ablation `<TBD>`。
+- **job ids:** smoke `47894361` (DONE); Stage-1 full `47894980` (RUNNING); Stage-2 `<TBD>`; eval `<TBD>`; ablation `<TBD>`。
 - **outputs on /ibex:** Stage-1 ckpts `runs/s1_esm3lora/esm3lora_s1_{epoch}.pt`（adapter-only ~13MB/each）。
 
 ## 4. Change log
 - 2026-06-30: code 半场 (Tasks 1-5) done + final whole-branch review (opus, Ready=Yes, 0 Critical/Important); pushed `a488532..63c6049`。
 - 2026-06-30: Ibex sync 到 per-branch path。**GOTCHA**: `data/SKEMPI2_PDBs` 是指向 `/home/...`（worktree 外主仓库）的 symlink，`rsync -a` 拷成 broken link（Ibex 上只 1 个）；已用 rsync 真实文件修复（1092 on Ibex）。其余 data 为真文件。
 - 2026-06-30 13:45: Stage-1 GPU smoke（job `47894361`, `--limit 3`）COMPLETED 44s, loss 0.325, adapter ckpt 13.1MB → **bf16 `out.embeddings` GPU path 验证通过**（final-review residual 关闭）。
-- 2026-06-30 13:51: 按新 ibex-usage §5（plan-first record md）写本文件；即将 submit Stage-1 full（lr 1e-3, 15 ep, 239 train domains）。
+- 2026-06-30 13:51: 按新 ibex-usage §5（plan-first record md）写本文件；commit/push 后 submit Stage-1 full = job `47894980`（lr 1e-3, 15 ep, 239 train domains, a100, --time 24h）。
+- 2026-06-30 ~14:00: 按 **local-first** 原则修正 SKEMPI 数据 —— 本地 worktree `data/SKEMPI2_PDBs` 由 symlink(→主仓库) 改为**真实文件**（1092, 220M, gitignored, self-contained），再 rsync 拉齐 Ibex（两侧 1092）。教训沉淀进 ibex-usage §1c-3（symlink trap, fix-local-then-sync）+ memory `verify-before-acting-on-discovered-issues`。
 
 ## 5. Results  (← fill AFTER jobs finish)
 | stage / config | job id | per-iface Spearman | overall | notes |
