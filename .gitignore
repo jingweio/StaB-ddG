@@ -5,3 +5,11 @@ wandb/
 *~
 .*
 *cache*
+
+# Large task data copied into this branch (per-branch self-containment; never commit)
+data/SKEMPI2_PDBs/
+data/megascale/
+data/mgnify/
+
+data/esm3dg_weights/
+esm3dg_stab/__pycache__/
