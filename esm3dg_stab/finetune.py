@@ -70,6 +70,8 @@ def main():
     ap.add_argument("--batch_tokens", type=int, default=8000)
     ap.add_argument("--max_batch", type=int, default=8, help="hard cap on #seqs/batch (ESM3 memory)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--single_batch", action="store_true",
+                    help="sample one batch of mutants per domain/epoch (needed for Megascale: ~1460 muts/domain)")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--out", required=True)
     ap.add_argument("--run_name", default="run")
@@ -120,19 +122,24 @@ def main():
             L = (it["complex"]["seq"].shape[0] if args.stage == "skempi" else it["enc"]["seq"].shape[0])
             M = _batch_M(L, args.batch_tokens, args.max_batch)
             n = label.shape[0]
+            perm = torch.randperm(n)                       # shuffle mutants within domain each epoch
+            label = label[perm.to(dev)]
             ps = []
             try:
                 for s in range(0, n, M):
                     e = min(n, s + M)
+                    pi = perm[s:e]
                     optimizer.zero_grad()
                     if args.stage == "skempi":
                         pred = scorer.binding_ddG(it["complex"], it["binder1"], it["binder2"],
-                                                  it["complex_mut"][s:e], it["binder1_mut"][s:e], it["binder2_mut"][s:e])
+                                                  it["complex_mut"][pi], it["binder1_mut"][pi], it["binder2_mut"][pi])
                     else:
-                        pred = scorer.folding_ddG(it["enc"], it["mut"][s:e])
+                        pred = scorer.folding_ddG(it["enc"], it["mut"][pi])
                     loss = loss_fn(pred, label[s:e])
                     loss.backward(); optimizer.step()
                     losses.append(loss.item()); ps.append(pred.detach().cpu())
+                    if args.single_batch:                  # one batch/domain/epoch (Megascale: ~1460 muts/domain)
+                        break
             except torch.cuda.OutOfMemoryError:
                 oom += 1; optimizer.zero_grad(set_to_none=True); torch.cuda.empty_cache()
                 continue  # skip rest of this (too-large) complex this epoch
