@@ -167,5 +167,9 @@ class ESM3StabScorer(SequenceScorer):
         sd = torch.load(path, map_location=self.device, weights_only=True)
         model_sd = {k[len("model."):]: v for k, v in sd.items() if k.startswith("model.")}
         head_sd = {k[len("head."):]: v for k, v in sd.items() if k.startswith("head.")}
+        assert len(model_sd) > 0, (
+            f"no LoRA adapter keys found in checkpoint {path!r} — "
+            "corrupt or wrong-format adapter file"
+        )
         self.model.load_state_dict(model_sd, strict=False)
         self.head.load_state_dict(head_sd, strict=True)
