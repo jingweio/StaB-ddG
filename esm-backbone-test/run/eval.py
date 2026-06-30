@@ -161,6 +161,7 @@ _EVAL_BATCH_SIZE = {
     "esmc_600m": 10000,
     "esmc_6b": 10000,
     "esm3": 2000,
+    "esm3_stab": 2000,
 }
 
 
@@ -203,7 +204,7 @@ def main():
         description="Evaluate a finetuned backbone checkpoint on the SKEMPI test split.",
     )
     ap.add_argument("--backbone", required=True,
-                    choices=["mpnn", "esmc_600m", "esmc_6b", "esm3"])
+                    choices=["mpnn", "esmc_600m", "esmc_6b", "esm3", "esm3_stab"])
     ap.add_argument("--checkpoint", type=str, required=True,
                     help="finetuned backbone state_dict (mpnn: StaB-ddG ckpt; "
                          "esm*: consolidated/per-epoch backbone state_dict)")
