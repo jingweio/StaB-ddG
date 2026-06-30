@@ -113,7 +113,7 @@ def main():
     for ep in range(args.epochs):
         scorer.model.train()
         order = np.random.permutation(len(items))
-        losses, sps = [], []
+        losses, sps, oom = [], [], 0
         for idx in order:
             it = items[idx]
             label = it["ddG"].to(dev)
@@ -121,22 +121,28 @@ def main():
             M = _batch_M(L, args.batch_tokens, args.max_batch)
             n = label.shape[0]
             ps = []
-            for s in range(0, n, M):
-                e = min(n, s + M)
-                optimizer.zero_grad()
-                if args.stage == "skempi":
-                    pred = scorer.binding_ddG(it["complex"], it["binder1"], it["binder2"],
-                                              it["complex_mut"][s:e], it["binder1_mut"][s:e], it["binder2_mut"][s:e])
-                else:
-                    pred = scorer.folding_ddG(it["enc"], it["mut"][s:e])
-                loss = loss_fn(pred, label[s:e])
-                loss.backward(); optimizer.step()
-                losses.append(loss.item()); ps.append(pred.detach().cpu())
-            ps = torch.cat(ps)
-            if n >= 3:
-                sp, _ = spearmanr(ps.numpy(), label[:ps.shape[0]].cpu().numpy())
-                if np.isfinite(sp): sps.append(sp)
-        print(f"  epoch {ep+1}/{args.epochs}  loss={np.mean(losses):.4f}  train_spearman={np.mean(sps):.3f}", flush=True)
+            try:
+                for s in range(0, n, M):
+                    e = min(n, s + M)
+                    optimizer.zero_grad()
+                    if args.stage == "skempi":
+                        pred = scorer.binding_ddG(it["complex"], it["binder1"], it["binder2"],
+                                                  it["complex_mut"][s:e], it["binder1_mut"][s:e], it["binder2_mut"][s:e])
+                    else:
+                        pred = scorer.folding_ddG(it["enc"], it["mut"][s:e])
+                    loss = loss_fn(pred, label[s:e])
+                    loss.backward(); optimizer.step()
+                    losses.append(loss.item()); ps.append(pred.detach().cpu())
+            except torch.cuda.OutOfMemoryError:
+                oom += 1; optimizer.zero_grad(set_to_none=True); torch.cuda.empty_cache()
+                continue  # skip rest of this (too-large) complex this epoch
+            if ps:
+                ps = torch.cat(ps)
+                if ps.shape[0] >= 3:
+                    sp, _ = spearmanr(ps.numpy(), label[:ps.shape[0]].cpu().numpy())
+                    if np.isfinite(sp): sps.append(sp)
+        print(f"  epoch {ep+1}/{args.epochs}  loss={np.mean(losses):.4f}  "
+              f"train_spearman={np.mean(sps):.3f}  oom_skipped_complexes={oom}", flush=True)
 
     save_adapters(scorer, args.out)
     print(f"saved adapters -> {args.out}")

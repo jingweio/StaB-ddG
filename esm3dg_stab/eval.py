@@ -21,6 +21,7 @@ def main():
     ap.add_argument("--data_dir", default=os.path.join(HERE, "..", "data"))
     ap.add_argument("--split", default="test")
     ap.add_argument("--batch_tokens", type=int, default=8000)
+    ap.add_argument("--max_batch", type=int, default=8)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--out", default="")
     args = ap.parse_args()
@@ -38,9 +39,17 @@ def main():
         limit=args.limit)
 
     per_struct, all_pred, all_label, rows = [], [], [], []
+    skipped = []
     with torch.no_grad():
         for it in items:
-            pred = chunked_binding_ddG(scorer, it, args.batch_tokens).cpu().numpy()
+            try:
+                pred = chunked_binding_ddG(scorer, it, args.batch_tokens, args.max_batch).cpu().numpy()
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache()
+                try:  # retry one sequence at a time
+                    pred = chunked_binding_ddG(scorer, it, 1, 1).cpu().numpy()
+                except torch.cuda.OutOfMemoryError:
+                    torch.cuda.empty_cache(); skipped.append(it["name"]); continue
             label = it["ddG"].cpu().numpy()
             all_pred.append(pred); all_label.append(label)
             for p, l in zip(pred, label):
@@ -48,6 +57,8 @@ def main():
             if len(label) >= 2:
                 sp, _ = spearmanr(pred, label)
                 if np.isfinite(sp): per_struct.append(sp)
+    if skipped:
+        print(f"WARNING: skipped {len(skipped)} complexes (OOM even at M=1): {skipped}")
     all_pred = np.concatenate(all_pred); all_label = np.concatenate(all_label)
     overall_sp, _ = spearmanr(all_pred, all_label)
     overall_pr, _ = pearsonr(all_pred, all_label)
