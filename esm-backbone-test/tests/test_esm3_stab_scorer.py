@@ -44,6 +44,7 @@ def test_wt_ddG_zero(scorer):
 def test_mutation_changes_dG(scorer):
     dom = _load()["binder1"]
     wt = scorer.get_wt_seq(dom)
+    assert wt.shape[1] > 5, "fixture sequence too short for this test"
     mut = wt.clone()
     mut[0, 5] = (mut[0, 5] + 1) % 20
     d = scorer.folding_ddG(dom, mut)
@@ -59,6 +60,18 @@ def test_batch_consistency(scorer):
     dG_b = scorer.folding_dG(dom, batch)
     dG_e = torch.cat([scorer.folding_dG(dom, s1), scorer.folding_dG(dom, s2)])
     assert torch.allclose(dG_b, dG_e, atol=1e-3), (dG_b, dG_e)
+
+
+def test_lora_injected_and_base_frozen(scorer):
+    scorer.freeze_base()
+    named = dict(scorer.model.named_parameters())
+    lora_names = [n for n in named if "lora_" in n]
+    assert lora_names, "no LoRA params injected (inject_adapter_in_model target mismatch?)"
+    assert all(named[n].requires_grad for n in lora_names), "some LoRA params frozen"
+    assert all(not named[n].requires_grad for n in named if "lora_" not in n), "base param not frozen"
+    assert all(p.requires_grad for p in scorer.head.parameters()), "head param frozen"
+    tp = scorer.trainable_parameters()
+    assert len(tp) == len(lora_names) + len(list(scorer.head.parameters()))
 
 
 def test_factory_returns_scorer():

@@ -164,7 +164,7 @@ class ESM3StabScorer(SequenceScorer):
         torch.save(sd, path)
 
     def load_adapters(self, path):
-        sd = torch.load(path, map_location=self.device)
+        sd = torch.load(path, map_location=self.device, weights_only=True)
         model_sd = {k[len("model."):]: v for k, v in sd.items() if k.startswith("model.")}
         head_sd = {k[len("head."):]: v for k, v in sd.items() if k.startswith("head.")}
         self.model.load_state_dict(model_sd, strict=False)
