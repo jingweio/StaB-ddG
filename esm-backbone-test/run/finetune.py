@@ -163,7 +163,10 @@ def _build_optimizer(params, args):
 def _select_trainable_params(scorer, backbone):
     """Params to optimize. For parameter-efficient scorers (esm3_stab) freeze the
     base and return only LoRA+head; else preserve the original full-FT behavior
-    (all backbone params, requires_grad_(True))."""
+    (all backbone params, requires_grad_(True)).
+
+    ``backbone`` is accepted for signature symmetry but not dispatched on (selection is via ``hasattr`` on the scorer).
+    """
     bb = scorer.backbone_module
     if hasattr(scorer, "trainable_parameters") and hasattr(scorer, "freeze_base"):
         scorer.freeze_base()
@@ -175,7 +178,10 @@ def _select_trainable_params(scorer, backbone):
 
 
 def _save_backbone_ckpt(scorer, backbone, path):
-    """Save adapters-only for parameter-efficient scorers, else full state_dict."""
+    """Save adapters-only for parameter-efficient scorers, else full state_dict.
+
+    ``backbone`` is accepted for signature symmetry but not dispatched on (selection is via ``hasattr`` on the scorer).
+    """
     if hasattr(scorer, "save_adapters"):
         scorer.save_adapters(path)
     else:
@@ -347,7 +353,6 @@ def finetune(model, train_dataset, args, device):
     (the backbone state_dict) after every epoch.
     """
     scorer = model.scorer
-    backbone = scorer.backbone_module
     optimizer = _build_optimizer(_select_trainable_params(scorer, args.backbone), args)
     # total_steps = epochs * sum over complexes of ceil(N_muts / M); used for the
     # warmup / cosine schedule. At defaults the schedule multiplier is a constant
@@ -438,8 +443,6 @@ def finetune_stability(scorer, dataset_train, ddG_data, args, device):
     batching and per-domain mutant shuffling, mirroring the original recipe and
     the stage-2 loop's logging / per-epoch checkpoint save.
     """
-    backbone = scorer.backbone_module
-
     optimizer = _build_optimizer(_select_trainable_params(scorer, args.backbone), args)
     # total_steps = epochs * sum over domains of ceil(N_muts / M). Domains map to
     # ddG_data[f'{name}.pdb']['mut_seqs'] (shape [N, L]); domains absent from
@@ -522,6 +525,16 @@ def finetune_stability(scorer, dataset_train, ddG_data, args, device):
 
 
 def _load_checkpoint_for_esm(scorer, backbone, checkpoint):
+    """Load a prior-stage backbone state_dict into an ESM-C / ESM3 scorer.
+
+    ``build_scorer`` honours ``--checkpoint`` only for the ``mpnn`` backbone (it
+    loads the ProteinMPNN weights there). For ESM-C / ESM3 the factory ignores it,
+    so to chain stage-1 -> stage-2 (or resume) we load the consolidated backbone
+    state_dict into ``scorer.backbone_module`` AFTER the scorer is built. No-op for
+    mpnn (already handled) or when ``checkpoint`` is None.
+
+    For parameter-efficient scorers exposing ``load_adapters`` (e.g. esm3_stab), this loads only the LoRA+head adapters and returns early.
+    """
     if checkpoint is None or backbone == "mpnn":
         return
     if hasattr(scorer, "load_adapters"):
