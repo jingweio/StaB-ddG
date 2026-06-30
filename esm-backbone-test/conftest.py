@@ -40,7 +40,7 @@ from pathlib import Path
 # --------------------------------------------------------------------------- #
 # Offline HuggingFace cache — must be set before any esm import               #
 # --------------------------------------------------------------------------- #
-os.environ.setdefault("HF_HOME", "/home/guoj0f/repos/esm/.hf_cache")
+os.environ.setdefault("HF_HOME", "/home/guoj0f/share/hf_cache")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 # --------------------------------------------------------------------------- #

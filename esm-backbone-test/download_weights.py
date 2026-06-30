@@ -2,7 +2,7 @@
 """Download ESM model weights for the StaB-ddG ESM-backbone experiment.
 
 Weights are cached inside the `esm` repo (reproduce branch) at
-$HF_HOME=/home/guoj0f/repos/esm/.hf_cache (gitignored), then symlinked into this
+$HF_HOME=/home/guoj0f/share/hf_cache (gitignored), then symlinked into this
 experiment repo under esm-backbone-test/weights/<name> so the experiment's
 load-paths live in THIS repo (per requirement 1).
 
@@ -10,7 +10,7 @@ All four biohub models are ungated (verified). hf_transfer is enabled for speed.
 """
 import os
 
-os.environ.setdefault("HF_HOME", "/home/guoj0f/repos/esm/.hf_cache")
+os.environ.setdefault("HF_HOME", "/home/guoj0f/share/hf_cache")
 os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
 
 from pathlib import Path

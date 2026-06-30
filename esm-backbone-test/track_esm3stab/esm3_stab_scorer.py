@@ -21,7 +21,7 @@ the PeftModel wrapper.
 """
 import os
 
-os.environ.setdefault("HF_HOME", "/home/guoj0f/repos/esm/.hf_cache")
+os.environ.setdefault("HF_HOME", "/home/guoj0f/share/hf_cache")
 
 import torch
 from torch import nn

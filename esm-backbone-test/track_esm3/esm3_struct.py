@@ -112,7 +112,9 @@ class ESM3StructTokenizer:
         via gaps in ``residue_index``).
         """
         complex_ = ProteinComplex.from_pdb(pdb_path)
-        if complex_.num_chains <= 1:
+        # esm 3.2.1 ProteinComplex has no ``num_chains`` property (added later);
+        # count chains via ``chain_iter`` (present in 3.2.1 and 3.3.0).
+        if len(list(complex_.chain_iter())) <= 1:
             # Single chain: the simpler ProteinChain path is cleaner (no forced
             # chain-id collapse) and is the explicitly validated route.
             return ProteinChain.from_pdb(pdb_path, chain_id="detect")

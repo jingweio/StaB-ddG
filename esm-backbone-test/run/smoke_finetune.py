@@ -33,7 +33,7 @@ _WORKTREE_ROOT = _PKG_ROOT.parent
 for _p in (str(_WORKTREE_ROOT), str(_PKG_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
-os.environ.setdefault("HF_HOME", "/home/guoj0f/repos/esm/.hf_cache")
+os.environ.setdefault("HF_HOME", "/home/guoj0f/share/hf_cache")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
