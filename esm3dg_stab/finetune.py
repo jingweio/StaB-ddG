@@ -121,29 +121,35 @@ def main():
             it = items[idx]
             label = it["ddG"].to(dev)
             L = (it["complex"]["seq"].shape[0] if args.stage == "skempi" else it["enc"]["seq"].shape[0])
-            M = _batch_M(L, args.batch_tokens, args.max_batch)
             n = label.shape[0]
             perm = torch.randperm(n)                       # shuffle mutants within domain each epoch
             label = label[perm.to(dev)]
-            ps = []
-            try:
-                for s in range(0, n, M):
-                    e = min(n, s + M)
-                    pi = perm[s:e]
-                    optimizer.zero_grad()
-                    if args.stage == "skempi":
-                        pred = scorer.binding_ddG(it["complex"], it["binder1"], it["binder2"],
-                                                  it["complex_mut"][pi], it["binder1_mut"][pi], it["binder2_mut"][pi])
-                    else:
-                        pred = scorer.folding_ddG(it["enc"], it["mut"][pi])
-                    loss = loss_fn(pred, label[s:e])
-                    loss.backward(); optimizer.step()
-                    losses.append(loss.item()); ps.append(pred.detach().cpu())
-                    if args.single_batch:                  # one batch/domain/epoch (Megascale: ~1460 muts/domain)
-                        break
-            except torch.cuda.OutOfMemoryError:
-                oom += 1; optimizer.zero_grad(set_to_none=True); torch.cuda.empty_cache()
-                continue  # skip rest of this (too-large) complex this epoch
+            M0 = _batch_M(L, args.batch_tokens, args.max_batch)
+            success, ps = False, []
+            # fall back M0 -> 2 -> 1 on OOM before giving up (recovers large complexes;
+            # a too-big complex usually OOMs on the FIRST chunk, so no steps are applied yet)
+            for Mtry in sorted({M0, 2, 1}, reverse=True):
+                ps = []
+                try:
+                    for s in range(0, n, Mtry):
+                        e = min(n, s + Mtry)
+                        pi = perm[s:e]
+                        optimizer.zero_grad()
+                        if args.stage == "skempi":
+                            pred = scorer.binding_ddG(it["complex"], it["binder1"], it["binder2"],
+                                                      it["complex_mut"][pi], it["binder1_mut"][pi], it["binder2_mut"][pi])
+                        else:
+                            pred = scorer.folding_ddG(it["enc"], it["mut"][pi])
+                        loss = loss_fn(pred, label[s:e])
+                        loss.backward(); optimizer.step()
+                        losses.append(loss.item()); ps.append(pred.detach().cpu())
+                        if args.single_batch:              # one batch/domain/epoch (Megascale: ~1460 muts/domain)
+                            break
+                    success = True; break
+                except torch.cuda.OutOfMemoryError:
+                    optimizer.zero_grad(set_to_none=True); torch.cuda.empty_cache(); continue
+            if not success:
+                oom += 1; continue
             if ps:
                 ps = torch.cat(ps)
                 if ps.shape[0] >= 3:
