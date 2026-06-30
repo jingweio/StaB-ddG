@@ -134,7 +134,7 @@ _STAB_ALPHABET = "ACDEFGHIKLMNPQRSTVWYX"
 # retained scorer graphs per step). Measured on the 20GB A4500 — see module
 # docstring. ESM-C training OOMs at the eval budget of 10000; ESM3 attention is
 # O(B*L^2). MPNN is tiny and keeps the original recipe's 10000.
-DEFAULT_BATCH_SIZE = {"mpnn": 10000, "esmc_600m": 2000, "esmc_6b": 2000, "esm3": 500}
+DEFAULT_BATCH_SIZE = {"mpnn": 10000, "esmc_600m": 2000, "esmc_6b": 2000, "esm3": 500, "esm3_stab": 1000}
 
 
 # --------------------------------------------------------------------------- #
@@ -158,6 +158,28 @@ def _build_optimizer(params, args):
     if args.optimizer == "adamw":
         return torch.optim.AdamW(params, lr=args.lr, weight_decay=args.weight_decay)
     return torch.optim.Adam(params, lr=args.lr)
+
+
+def _select_trainable_params(scorer, backbone):
+    """Params to optimize. For parameter-efficient scorers (esm3_stab) freeze the
+    base and return only LoRA+head; else preserve the original full-FT behavior
+    (all backbone params, requires_grad_(True))."""
+    bb = scorer.backbone_module
+    if hasattr(scorer, "trainable_parameters") and hasattr(scorer, "freeze_base"):
+        scorer.freeze_base()
+        bb.train()
+        return scorer.trainable_parameters()
+    bb.train()
+    bb.requires_grad_(True)
+    return bb.parameters()
+
+
+def _save_backbone_ckpt(scorer, backbone, path):
+    """Save adapters-only for parameter-efficient scorers, else full state_dict."""
+    if hasattr(scorer, "save_adapters"):
+        scorer.save_adapters(path)
+    else:
+        torch.save(scorer.backbone_module.state_dict(), path)
 
 
 def _estimate_total_steps(args, *, complex_lengths_and_counts):
@@ -324,9 +346,9 @@ def finetune(model, train_dataset, args, device):
     per-epoch mean train loss to stdout and a small CSV, and saves a checkpoint
     (the backbone state_dict) after every epoch.
     """
-    backbone = model.scorer.backbone_module
-
-    optimizer = _build_optimizer(backbone.parameters(), args)
+    scorer = model.scorer
+    backbone = scorer.backbone_module
+    optimizer = _build_optimizer(_select_trainable_params(scorer, args.backbone), args)
     # total_steps = epochs * sum over complexes of ceil(N_muts / M); used for the
     # warmup / cosine schedule. At defaults the schedule multiplier is a constant
     # 1.0, so this estimate has no effect on the LR.
@@ -339,9 +361,6 @@ def finetune(model, train_dataset, args, device):
     )
     scheduler = _build_scheduler(optimizer, args, total_steps)
     ddG_loss_fn = torch.nn.MSELoss()
-
-    backbone.train()
-    backbone.requires_grad_(True)
 
     os.makedirs(args.out, exist_ok=True)
     log_path = os.path.join(args.out, f"{args.run_name}_train_log.csv")
@@ -405,7 +424,7 @@ def finetune(model, train_dataset, args, device):
                      f"{epoch + 1},{mean_loss:.6f},{cur_lr:.6e}\n")
 
         ckpt_path = os.path.join(args.out, f"{args.run_name}_{epoch + 1}.pt")
-        torch.save(backbone.state_dict(), ckpt_path)
+        _save_backbone_ckpt(scorer, args.backbone, ckpt_path)
         print(f"[ckpt] saved {ckpt_path}", flush=True)
 
 
@@ -421,7 +440,7 @@ def finetune_stability(scorer, dataset_train, ddG_data, args, device):
     """
     backbone = scorer.backbone_module
 
-    optimizer = _build_optimizer(backbone.parameters(), args)
+    optimizer = _build_optimizer(_select_trainable_params(scorer, args.backbone), args)
     # total_steps = epochs * sum over domains of ceil(N_muts / M). Domains map to
     # ddG_data[f'{name}.pdb']['mut_seqs'] (shape [N, L]); domains absent from
     # ddG_data (or with N==0) contribute 0 steps, matching the inner loop.
@@ -440,9 +459,6 @@ def finetune_stability(scorer, dataset_train, ddG_data, args, device):
     )
     scheduler = _build_scheduler(optimizer, args, total_steps)
     ddG_loss_fn = torch.nn.MSELoss()
-
-    backbone.train()
-    backbone.requires_grad_(True)
 
     os.makedirs(args.out, exist_ok=True)
     log_path = os.path.join(args.out, f"{args.run_name}_train_log.csv")
@@ -501,37 +517,31 @@ def finetune_stability(scorer, dataset_train, ddG_data, args, device):
                      f"{epoch + 1},{mean_loss:.6f},{cur_lr:.6e}\n")
 
         ckpt_path = os.path.join(args.out, f"{args.run_name}_{epoch + 1}.pt")
-        torch.save(backbone.state_dict(), ckpt_path)
+        _save_backbone_ckpt(scorer, args.backbone, ckpt_path)
         print(f"[ckpt] saved {ckpt_path}", flush=True)
 
 
 def _load_checkpoint_for_esm(scorer, backbone, checkpoint):
-    """Load a prior-stage backbone state_dict into an ESM-C / ESM3 scorer.
-
-    ``build_scorer`` honours ``--checkpoint`` only for the ``mpnn`` backbone (it
-    loads the ProteinMPNN weights there). For ESM-C / ESM3 the factory ignores it,
-    so to chain stage-1 -> stage-2 (or resume) we load the consolidated backbone
-    state_dict into ``scorer.backbone_module`` AFTER the scorer is built. No-op for
-    mpnn (already handled) or when ``checkpoint`` is None.
-    """
     if checkpoint is None or backbone == "mpnn":
         return
+    if hasattr(scorer, "load_adapters"):
+        scorer.load_adapters(checkpoint)
+        print(f"[checkpoint] loaded LoRA+head adapters from {checkpoint}", flush=True)
+        return
     sd = torch.load(checkpoint, map_location="cpu")
-    # Tolerate a checkpoint that wraps the state_dict under a common key.
     if isinstance(sd, dict) and "model_state_dict" in sd:
         sd = sd["model_state_dict"]
     missing, unexpected = scorer.backbone_module.load_state_dict(sd, strict=False)
     if missing or unexpected:
-        print(f"[checkpoint] load_state_dict non-strict: "
-              f"{len(missing)} missing, {len(unexpected)} unexpected keys",
-              flush=True)
+        print(f"[checkpoint] load_state_dict non-strict: {len(missing)} missing, "
+              f"{len(unexpected)} unexpected keys", flush=True)
     print(f"[checkpoint] loaded backbone init weights from {checkpoint}", flush=True)
 
 
 def main():
     ap = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     ap.add_argument("--backbone", required=True,
-                    choices=["mpnn", "esmc_600m", "esmc_6b", "esm3"])
+                    choices=["mpnn", "esmc_600m", "esmc_6b", "esm3", "esm3_stab"])
     ap.add_argument("--stage", default="skempi", choices=["skempi", "stability"],
                     help="skempi = SKEMPI binding (stage-2); "
                          "stability = Megascale folding stability (stage-1)")
