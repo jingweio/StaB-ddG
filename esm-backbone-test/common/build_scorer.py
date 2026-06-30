@@ -50,4 +50,8 @@ def build_scorer(backbone, device="cuda", checkpoint=None, pdb_dir=None):
         from track_esm3.esm3_scorer import ESM3Scorer
         return ESM3Scorer(device=device, pdb_dir=pdb_dir)
 
+    if backbone == "esm3_stab":
+        from track_esm3stab.esm3_stab_scorer import ESM3StabScorer
+        return ESM3StabScorer(device=device, pdb_dir=pdb_dir)
+
     raise ValueError(f"unknown backbone {backbone}")
