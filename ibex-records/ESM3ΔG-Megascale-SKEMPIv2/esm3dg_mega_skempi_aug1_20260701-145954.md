@@ -1,4 +1,4 @@
-# ESM3ΔG-Megascale-SKEMPIv2 — experiment record  (created 2026-07-01; status: PLANNED)
+# ESM3ΔG-Megascale-SKEMPIv2 — experiment record  (created 2026-07-01; status: RUNNING)
 
 > **REDO**:第一次 run(2026-06-30)跑在**已污染并删除的** `/home/guoj0f/repos/esm` 上,结果作废(旧 test per-structure 0.008;stage-2 曾几乎没学动)。本次在干净的 `share/esm` + `share/hf_cache` 上重跑。
 
@@ -24,6 +24,8 @@
 - 2026-07-01:依赖迁 share/esm;旧记录已清;plan 写于重跑前。job 未提交(待 env 重建 + smoke)。
 
 - 2026-07-01(cont.):env 明确为**独立 `esm3dg`**(py3.12,torch2.6+cu124,esm 3.3.0 editable from share/esm;从本地打的 per-branch wheelhouse 离线装 + `--no-build-isolation`)。**不用 esm-backbone**(那是别 task 的 env)。本地 + Ibex a100 smoke 均通过(ESM3ΔG 加载/预测 ΔG 一致、scorer OK)。**首次提交误用 esm-backbone 已取消**,改用 esm3dg 重新提交。
+
+- 2026-07-01(cont.):**task2 (ESM3ΔG→Megascale→SKEMPI) 提交,job 47936772**(a100-80GB,esm3dg env)。RUNNING。
 
 ## 5. Results  (jobs 完成后填)
 - _待写入:stage-1/stage-2 曲线 / test per-structure / overall / 与 task1、0.448 对比 / 与旧(作废)0.008 对照。_
