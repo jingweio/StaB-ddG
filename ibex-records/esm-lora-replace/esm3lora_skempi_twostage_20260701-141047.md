@@ -27,12 +27,14 @@ Controlled: StaB 的 data / 两阶段 / ΔΔG loss / SKEMPI eval / split 全不�
 - **env:** `esm-backbone` (py3.12, versions above); env python `/ibex/user/guoj0f/anaconda3/envs/esm-backbone/bin`. sbatch exports `HF_HOME=/ibex/user/guoj0f/share/hf_cache` + `HF_HUB_OFFLINE=1`.
 - **code+data:** `/ibex/user/guoj0f/StaB-ddG/esm-replace` (per-branch); esm code + weights in `/ibex/user/guoj0f/share`.
 - **sbatch:** `ibex-records/esm-lora-replace/sh/{smoke_stage1,megascale_stage1}_esm3lora_20260701-141047.sh`
-- **job ids:** GPU smoke `<TBD>`; Stage-1 `<TBD>`; Stage-2 `<TBD>`; eval `<TBD>`; ablation `<TBD>`.
+- **job ids:** GPU smoke `47932618` (DONE, 40s, loss 0.325, ckpt 13.1MB — Ibex faithful stack validated); Stage-1 `47933357` (RUNNING); Stage-2 `<TBD>`; eval `<TBD>`; ablation `<TBD>`.
 - **outputs:** Stage-1 ckpts `runs/s1_esm3lora/esm3lora_s1_{epoch}.pt` (adapter-only ~13MB).
 
 ## 4. Change log
 - 2026-07-01: 大整改完成 —— 废弃/删 repos/esm（污染 fork）；建 share/ 共享存储；**重建 py3.12 忠实 env 对齐参考**；清旧记录 + Ibex 整个重建。本地 8/8 offline 测试过；Ibex env 验证版本一致。
 - 2026-07-01 14:10: plan-first record；即将跑 GPU 冒烟 → canonical Stage-1 (lr 1e-3)。
+- 2026-07-01 14:34: GPU 冒烟 (job 47932618) COMPLETED 40s, loss 0.325, adapter ckpt 13.1MB, device=cuda, 无 error → **Ibex 忠实栈 (py3.12+esm3.3.0官方+biohub权重+a100 bf16) 验证通过**。
+- 2026-07-01 14:3x: 提交 canonical Stage-1 = job `47933357` (lr 1e-3, AdamW, warmup0.05, cosine, 15 ep, batch 2000, 239 train domains, a100, --time 24h)。
 
 ## 5. Results (fill AFTER jobs)
 | stage / config | job id | per-iface Spearman | overall | notes |
