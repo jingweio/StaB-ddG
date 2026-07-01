@@ -5,7 +5,7 @@
  - check gradients flow to LoRA + head (and NOT to frozen ESM3 trunk)
 """
 import os, sys
-os.environ.setdefault("HF_HOME", "/home/guoj0f/repos/esm/.hf_cache")
+os.environ.setdefault("HF_HOME", "/home/guoj0f/share/hf_cache")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import torch

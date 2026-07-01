@@ -7,7 +7,7 @@ Faithful ESM3ΔG: only LoRA + stability head + output scaling train; ESM3 trunk 
 Stage chaining: pass a prior run's --resume to continue (megascale stage1 -> skempi stage2).
 """
 import os, sys, argparse, time
-os.environ.setdefault("HF_HOME", "/home/guoj0f/repos/esm/.hf_cache")
+os.environ.setdefault("HF_HOME", "/home/guoj0f/share/hf_cache")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import numpy as np

@@ -5,10 +5,10 @@ before we build the SKEMPI binding-ddG bridge.
 
 Run (in esm3dg env):
   cd <worktree>/esm3dg_stab
-  HF_HOME=/home/guoj0f/repos/esm/.hf_cache HF_HUB_OFFLINE=1 python smoke_load_predict.py
+  HF_HOME=/home/guoj0f/share/hf_cache HF_HUB_OFFLINE=1 python smoke_load_predict.py
 """
 import os, sys, time
-os.environ.setdefault("HF_HOME", "/home/guoj0f/repos/esm/.hf_cache")
+os.environ.setdefault("HF_HOME", "/home/guoj0f/share/hf_cache")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
