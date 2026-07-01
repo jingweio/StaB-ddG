@@ -13,3 +13,6 @@ data/mgnify/
 
 data/esm3dg_weights/
 esm3dg_stab/__pycache__/
+
+# Ibex env wheelhouse (per-branch, large, gitignored — §1d)
+env-build/
