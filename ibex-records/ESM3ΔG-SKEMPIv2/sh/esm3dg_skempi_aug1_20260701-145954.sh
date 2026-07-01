@@ -8,7 +8,7 @@
 #SBATCH --error=/ibex/user/guoj0f/StaB-ddG/MGnify-replace/ibex-records/ESM3ΔG-SKEMPIv2/esm3dg_skempi_aug1_20260701-145954_%j.err
 set -euo pipefail
 source /ibex/user/guoj0f/anaconda3/etc/profile.d/conda.sh
-conda activate esm-backbone   # py3.12 + torch2.6 + esm(from share/esm) — rebuilt via share/ibex_build_env_offline.sh
+conda activate esm3dg   # this task's DEDICATED env (py3.12+torch2.6+esm from share/esm; built offline from per-branch wheelhouse)
 export HF_HOME=/ibex/user/guoj0f/share/hf_cache HF_HUB_OFFLINE=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True TOKENIZERS_PARALLELISM=false
 cd /ibex/user/guoj0f/StaB-ddG/MGnify-replace/esm3dg_stab

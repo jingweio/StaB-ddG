@@ -18,10 +18,12 @@
 ## 3. Run config
 - SLURM:a100 ×1(A100-SXM4-80GB),walltime 23h,cpus 12,mem 110G。
 - sbatch:`ibex-records/ESM3ΔG-Megascale-SKEMPIv2/sh/esm3dg_mega_skempi_aug1_20260701-145954.sh`。
-- env / HF_HOME / 代码路径:同 task1(`esm-backbone` py3.12 + share/)。
+- env / HF_HOME / 代码路径:同 task1(`esm3dg` py3.12 + share/)。
 
 ## 4. Change log  (LIVE)
 - 2026-07-01:依赖迁 share/esm;旧记录已清;plan 写于重跑前。job 未提交(待 env 重建 + smoke)。
+
+- 2026-07-01(cont.):env 明确为**独立 `esm3dg`**(py3.12,torch2.6+cu124,esm 3.3.0 editable from share/esm;从本地打的 per-branch wheelhouse 离线装 + `--no-build-isolation`)。**不用 esm-backbone**(那是别 task 的 env)。本地 + Ibex a100 smoke 均通过(ESM3ΔG 加载/预测 ΔG 一致、scorer OK)。**首次提交误用 esm-backbone 已取消**,改用 esm3dg 重新提交。
 
 ## 5. Results  (jobs 完成后填)
 - _待写入:stage-1/stage-2 曲线 / test per-structure / overall / 与 task1、0.448 对比 / 与旧(作废)0.008 对照。_
