@@ -3,7 +3,7 @@
 #SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=110G
-#SBATCH --time=23:00:00
+#SBATCH --time=10:00:00
 #SBATCH --output=/ibex/user/guoj0f/StaB-ddG/MGnify-replace/ibex-records/ESM3ΔG-Megascale-SKEMPIv2/esm3dg_mega_skempi_aug1_20260701-145954_%j.out
 #SBATCH --error=/ibex/user/guoj0f/StaB-ddG/MGnify-replace/ibex-records/ESM3ΔG-Megascale-SKEMPIv2/esm3dg_mega_skempi_aug1_20260701-145954_%j.err
 set -euo pipefail
