@@ -15,7 +15,8 @@ Controlled: StaB 的 data / 两阶段 / ΔΔG loss / SKEMPI eval / split 全不�
 - **loss = StaB ΔΔG MSE**；no sigmoid, no absolute-ΔG term。
 - **data = Megascale (Stage-1, 239 train domains) → SKEMPI (Stage-2)**。
 - **ENV (faithful to reference, rebuilt 2026-07-01):** py3.12.13 / torch2.6.0+cu124 / **transformers4.57.6** / **esm3.3.0 官方 main (commit cf002f1d)** / biotite1.7.1 / peft0.19.1；权重 `biohub/esm3-sm-open-v1`。（旧 py3.11+transformers5.12.1+esm-fork 环境不忠实、已弃。）
-- **Stage-1 HP (USER CONFIRMED):** **lr=1e-3**（参考 `config_esm3.py` 的值，**不采纳旧实验 memory**）, AdamW, warmup_frac=0.05, cosine, **15 epochs**, batch_size=2000 tokens, per-epoch ckpt。(参考 MGnify 用 200 ep；我们 Megascale 用 15 ep + per-epoch ckpt，按 Stage-2 eval 判优，不足再延。)
+- **Stage-1 HP:** **lr=5e-4** (canonical), AdamW, warmup_frac=0.05, cosine, **15 epochs**, batch_size=2000 tokens, per-epoch ckpt。(参考 MGnify 用 200 ep；我们 Megascale 用 15 ep + per-epoch ckpt，按 Stage-2 eval 判优，不足再延。)
+  - ⚠️ **lr 历史:** 初始按参考 `config_esm3.py` 用 **lr=1e-3** (job 47933357) → **在忠实环境上发散** (mean train loss 连涨 1.11→2.52→2.67 @ep1-3, cosine lr 仍近峰值) → ep3 kill。**USER DECISION 2026-07-01 17:15: 降到 lr=5e-4 重跑** (job 47936491)。此发散在忠实环境复现,证明"1e-3 偏高"是真实信号、非旧环境伪影。
 - **Stage-2 HP (PLANNED, 待 Stage-1 后确认):** lr≈5e-4, AdamW, warmup0.05, cosine, 15 ep, batch1000, 从 Stage-1 收敛 ckpt chain。
 - **ensemble=1**（deterministic）；baseline 0.445 用 ProteinMPNN MC ensembling（口径差异，透明标注）。
 
@@ -26,15 +27,16 @@ Controlled: StaB 的 data / 两阶段 / ΔΔG loss / SKEMPI eval / split 全不�
 - **SLURM:** a100 x1, cpus 12, mem 96G. Stage-1 `--time 24h`.
 - **env:** `esm-backbone` (py3.12, versions above); env python `/ibex/user/guoj0f/anaconda3/envs/esm-backbone/bin`. sbatch exports `HF_HOME=/ibex/user/guoj0f/share/hf_cache` + `HF_HUB_OFFLINE=1`.
 - **code+data:** `/ibex/user/guoj0f/StaB-ddG/esm-replace` (per-branch); esm code + weights in `/ibex/user/guoj0f/share`.
-- **sbatch:** `ibex-records/esm-lora-replace/sh/{smoke_stage1,megascale_stage1}_esm3lora_20260701-141047.sh`
-- **job ids:** GPU smoke `47932618` (DONE, 40s, loss 0.325, ckpt 13.1MB — Ibex faithful stack validated); Stage-1 `47933357` (RUNNING); Stage-2 `<TBD>`; eval `<TBD>`; ablation `<TBD>`.
-- **outputs:** Stage-1 ckpts `runs/s1_esm3lora/esm3lora_s1_{epoch}.pt` (adapter-only ~13MB).
+- **sbatch:** `sh/{smoke_stage1,megascale_stage1}_esm3lora_20260701-141047.sh` (旧, lr1e-3); **canonical Stage-1 = `sh/megascale_stage1_esm3lora_lr5e4_20260701-171537.sh`** (lr5e-4)
+- **job ids:** GPU smoke `47932618` (DONE, loss 0.325 — Ibex faithful stack validated); Stage-1(lr1e-3) `47933357` (**DIVERGED @ep3, CANCELLED**); **Stage-1(lr5e-4) `47936491` (RUNNING, canonical)**; Stage-2 `<TBD>`; eval `<TBD>`; ablation `<TBD>`.
+- **outputs:** Stage-1(lr5e-4) ckpts `runs/s1_esm3lora_lr5e4/esm3lora_s1_lr5e4_{epoch}.pt` (adapter-only ~13MB); 发散的 lr1e-3 run 在 `runs/s1_esm3lora/`。
 
 ## 4. Change log
 - 2026-07-01: 大整改完成 —— 废弃/删 repos/esm（污染 fork）；建 share/ 共享存储；**重建 py3.12 忠实 env 对齐参考**；清旧记录 + Ibex 整个重建。本地 8/8 offline 测试过；Ibex env 验证版本一致。
 - 2026-07-01 14:10: plan-first record；即将跑 GPU 冒烟 → canonical Stage-1 (lr 1e-3)。
 - 2026-07-01 14:34: GPU 冒烟 (job 47932618) COMPLETED 40s, loss 0.325, adapter ckpt 13.1MB, device=cuda, 无 error → **Ibex 忠实栈 (py3.12+esm3.3.0官方+biohub权重+a100 bf16) 验证通过**。
-- 2026-07-01 14:3x: 提交 canonical Stage-1 = job `47933357` (lr 1e-3, AdamW, warmup0.05, cosine, 15 ep, batch 2000, 239 train domains, a100, --time 24h)。
+- 2026-07-01 14:3x: 提交 Stage-1 = job `47933357` (lr 1e-3, AdamW, warmup0.05, cosine, 15 ep, batch 2000, 239 train domains, a100, --time 24h)。
+- 2026-07-01 17:15: **Stage-1(lr1e-3, 47933357) 发散** — mean train loss 连涨 1.11→2.52→2.67 (ep1-3), cosine lr 仍近峰值 → ep3 kill (CANCELLED, elapsed 2:33)。**USER DECISION: 降 lr→5e-4 重跑 = job `47936491`** (其余全同: AdamW/warmup0.05/cosine/15ep/batch2000, 独立 out dir `runs/s1_esm3lora_lr5e4`)。此发散在**忠实环境复现**,坐实"1e-3 偏高"为真实信号,非旧环境伪影。
 
 ## 5. Results (fill AFTER jobs)
 | stage / config | job id | per-iface Spearman | overall | notes |
