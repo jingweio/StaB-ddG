@@ -28,7 +28,7 @@ Controlled: StaB 的 data / 两阶段 / ΔΔG loss / SKEMPI eval / split 全不�
 - **env:** `esm-backbone` (py3.12, versions above); env python `/ibex/user/guoj0f/anaconda3/envs/esm-backbone/bin`. sbatch exports `HF_HOME=/ibex/user/guoj0f/share/hf_cache` + `HF_HUB_OFFLINE=1`.
 - **code+data:** `/ibex/user/guoj0f/StaB-ddG/esm-replace` (per-branch); esm code + weights in `/ibex/user/guoj0f/share`.
 - **sbatch:** `sh/{smoke_stage1,megascale_stage1}_esm3lora_20260701-141047.sh` (旧, lr1e-3); **canonical Stage-1 = `sh/megascale_stage1_esm3lora_lr5e4_20260701-171537.sh`** (lr5e-4)
-- **job ids:** GPU smoke `47932618` (DONE, loss 0.325 — Ibex faithful stack validated); Stage-1(lr1e-3) `47933357` (**DIVERGED @ep3, CANCELLED**); **Stage-1(lr5e-4) `47936491` (RUNNING, canonical)**; Stage-2 `<TBD>`; eval `<TBD>`; ablation `<TBD>`.
+- **job ids:** GPU smoke `47932618` (DONE, loss 0.325 — Ibex faithful stack validated); Stage-1(lr1e-3) `47933357` (**DIVERGED @ep3, CANCELLED**); **Stage-1(lr5e-4) `47936491` (✅ COMPLETED, 11:57h, 15ep; train loss 0.355→谷底 0.163@ep10-11→0.188@ep15)**; Stage-2 `<TBD>`; eval `<TBD>`; ablation `<TBD>`.
 - **outputs:** Stage-1(lr5e-4) ckpts `runs/s1_esm3lora_lr5e4/esm3lora_s1_lr5e4_{epoch}.pt` (adapter-only ~13MB); 发散的 lr1e-3 run 在 `runs/s1_esm3lora/`。
 
 ## 4. Change log
@@ -37,6 +37,7 @@ Controlled: StaB 的 data / 两阶段 / ΔΔG loss / SKEMPI eval / split 全不�
 - 2026-07-01 14:34: GPU 冒烟 (job 47932618) COMPLETED 40s, loss 0.325, adapter ckpt 13.1MB, device=cuda, 无 error → **Ibex 忠实栈 (py3.12+esm3.3.0官方+biohub权重+a100 bf16) 验证通过**。
 - 2026-07-01 14:3x: 提交 Stage-1 = job `47933357` (lr 1e-3, AdamW, warmup0.05, cosine, 15 ep, batch 2000, 239 train domains, a100, --time 24h)。
 - 2026-07-01 17:15: **Stage-1(lr1e-3, 47933357) 发散** — mean train loss 连涨 1.11→2.52→2.67 (ep1-3), cosine lr 仍近峰值 → ep3 kill (CANCELLED, elapsed 2:33)。**USER DECISION: 降 lr→5e-4 重跑 = job `47936491`** (其余全同: AdamW/warmup0.05/cosine/15ep/batch2000, 独立 out dir `runs/s1_esm3lora_lr5e4`)。此发散在**忠实环境复现**,坐实"1e-3 偏高"为真实信号,非旧环境伪影。
+- 2026-07-02 12:22: **Stage-1(lr5e-4, 47936491) ✅ COMPLETED** (11:57h, 15 epoch)。train loss **单调下降到 ep10-11 触底 0.163**,之后随 cosine lr→0 微升到 ep15 的 0.188。健康收敛(对比发散的 lr1e-3)。15 个 per-epoch adapter ckpt 全存于 `runs/s1_esm3lora_lr5e4/`。⚠️ **ep15 非 train-loss 最优(ep10/11 才是)** → Stage-2 chain 的 ckpt 待定(ep11 vs ep15 vs 都测,见下)。
 
 ## 5. Results (fill AFTER jobs)
 | stage / config | job id | per-iface Spearman | overall | notes |
