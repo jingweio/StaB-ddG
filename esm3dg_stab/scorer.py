@@ -93,17 +93,21 @@ class ESM3dGScorer:
         return out
 
     # ---- ΔG of a batch of sequences on a fixed backbone ------------------------
-    def folding_dG(self, enc, seq_tokens):
+    def folding_dG(self, enc, seq_tokens, scaled=False):
         """seq_tokens: LongTensor [B, L] of ESM3 sequence-token ids (L incl special toks,
-        same length as enc['seq']). Returns dG [B] = masked-mean per-residue stability."""
+        same length as enc['seq']). Returns dG [B] = masked-mean per-residue stability.
+        scaled=False -> raw head output (used for ΔΔG, default); scaled=True -> per-residue
+        SigmoidScaling applied first (calibrated absolute ΔG in ~[-1,5] kcal/mol, for the
+        MGnify absolute-dG reproduction — matches ESM3dG_predict sigmoid_on=True)."""
         B = seq_tokens.shape[0]
         batch = [{"seq": seq_tokens[i], "struct": enc["struct"], "coord": enc["coord"]}
                  for i in range(B)]
         self.model.ddg_scanning = False
-        dg, scaled_dg, mask = self.model(batch)          # dg:[B,L] per-residue, mask:[B,L]
-        mask = mask.to(dg.dtype)
+        dg, scaled_dg, mask = self.model(batch)          # dg,scaled_dg:[B,L] per-residue, mask:[B,L]
+        vals = scaled_dg if scaled else dg
+        mask = mask.to(vals.dtype)
         valid = mask.sum(dim=-1).clamp_min(1.0)
-        dG = (dg * mask).sum(dim=-1) / valid             # [B] masked mean (unscaled)
+        dG = (vals * mask).sum(dim=-1) / valid           # [B] masked mean
         return dG
 
     def folding_ddG(self, enc, mut_seq_tokens, wt_seq_tokens=None):
