@@ -15,7 +15,7 @@
 
 - **是监督回归,不是 likelihood**(和 ProteinMPNN/StaB-ddG 的 `Σ log P` 本质不同)。
 - **不是 masked-marginal**:整条真实序列一次性喂进去,不逐个 mask。
-- **结构只用 N/CA/C 骨架**:侧链不入模(见 §5)。
+- **结构只用 N/CA/C 骨架**:侧链不入模(见 §7)。
 - **~95% 是 token-embedding 建模**,但有 **1 层连续几何注意力**用真实坐标(见 §4),所以不是"纯" embedding。
 
 ---
@@ -68,7 +68,7 @@
   它把每个残基的**局部骨架几何**量化成一个离散 token。
 - **coords** 同时留作 `structure_coords[B,L,3,3]`(也只 N,CA,C),供 ③ 的几何注意力用。
 
-> `parse_CIF`(`esm3dg_model.py:273`)虽然把侧链读进了 atom37,但在 encode 时被 `[...,:3,:]` 切掉——**侧链是假象,下游没用**(见 §5)。
+> `parse_CIF`(`esm3dg_model.py:273`)虽然把侧链读进了 atom37,但在 encode 时被 `[...,:3,:]` 切掉——**侧链是假象,下游没用**(见 §7)。
 
 ---
 
@@ -135,7 +135,32 @@ dG = (dg * mask).sum(dim=-1) / valid       # masked-MEAN over 真实残基 → �
 
 ---
 
-## 6. 关键澄清(易踩的坑)
+## 6. 为什么 ESM3ΔG 弃用 ESM3 原生输出头、而新造一个回归头?
+
+ESM3 原生有 6 个输出头(`OutputHeads`,esm3.py:151-185),都是**逐位点的 token 分类头**(`sequence_head`→64 维词表、`structure_head`→4096 维…,`RegressionHead` 是 esm 里的命名误导,实为分类投影)。ESM3ΔG 全部弃用、另加一个 `Linear→LN→ReLU→Linear` 的**标量回归头**。原因有两层:
+
+**原因一(硬性):原生头的输出空间不是标量 ΔG。** 要预测 absolute 折叠稳定性(一个 kcal/mol 连续值),必须有输出标量的头;原生 6 个头没有一个输出空间对得上 → 无论如何都得新加。
+
+**原因二(更深刻):full unmasked sequence 进去后,原生 sequence-likelihood 头失去了稳定性区分度。**
+- ESM3 是**双向 MLM**,这次 forward 把**完整未 mask 的序列**喂进去。位点 `i` 的表示里已含 `aa_i` 本身(`sequence_embed(aa_i)` 在输入就进了残差流,双向 attention 让 `i` 能"看到自己")。
+- 于是原生 `sequence_head` 在位点 `i` 会趋向**直接"抄"输入的氨基酸**:`log P(aa_i | 结构, 其余序列, 且 aa_i 自己) ≈ 很高`,**不管该残基稳不稳定** → likelihood 被输入序列绑死,对稳定性没有区分度。
+
+**为什么 ProteinMPNN 的 `Σ log P` 却能当稳定性代理?** 因为它是**自回归 inverse folding**:预测位点 `i` 时只给结构 + 已解码的其他位点,**绝不把 `aa_i` 当输入**。所以 `log P(aa_i | 结构)` 真实衡量"这个氨基酸在这个结构环境里合不合适"。它成立的前提恰恰是"模型没看到被打分的那个残基"——ESM3 在"单次 forward + 全序列可见"下把这个前提破坏了。
+
+**能救回原生头吗?能,但 ESM3ΔG 没选。** 走 **masked-marginal / pseudo-log-likelihood**(逐位点 mask 掉 `aa_i`、读 `log P(aa_i | 结构+其余)`,即 ESM-1v/ESM2 的零样本变体打分套路)可以恢复信号,但:① **贵**——要 L 次 forward(ESM3ΔG 只 1 次);② 仍**非校准的物理 ΔG**,只是相对排序。
+
+**ESM3ΔG 的选择:** 单次 forward 拿每残基 embedding(编码了"`aa_i` 处于该 序列+结构 全局上下文的局部环境",信息远比单个 likelihood 标量丰富)→ 监督回归头映射到 ΔG。信息不浪费、便宜、且借 96 万条 MGnify 标签直接校准到 kcal/mol。本质是两种范式的取舍:
+
+| | likelihood-as-energy(ProteinMPNN/StaB)| supervised head on embedding(ESM3ΔG)|
+|---|---|---|
+| 前提 | 模型**不能看到**被打分残基(自回归/mask)| 看到全序列无妨,靠 head 从表示里学 |
+| 依赖标签 | 弱(likelihood 本身即先验)| 强(960k MGnify ΔG 监督)|
+| forward 成本 | 天然 1 次 | 1 次 |
+| 输出 | pseudo-log-likelihood(≤0)| 校准的 absolute ΔG(kcal/mol)|
+
+---
+
+## 7. 关键澄清(易踩的坑)
 
 1. **不是 likelihood**:ESM3ΔG 的 dG 是回归头读 embedding,不是 `Σ log P(aa|struct)`。likelihood 是 ProteinMPNN/StaB-ddG 的做法。
 2. **不是 masked-marginal**:整条真实序列 + 结构一次性喂进去,`embeddings` 是 full-context 隐藏态;**不逐个 mask aa 再预测**(那是 ESM2/ESM-1v 的零样本 pseudo-perplexity)。
@@ -144,7 +169,7 @@ dG = (dg * mask).sum(dim=-1) / valid       # masked-MEAN over 真实残基 → �
 
 ---
 
-## 7. 与 ProteinMPNN / StaB-ddG 的对比
+## 8. 与 ProteinMPNN / StaB-ddG 的对比
 
 | | ProteinMPNN / StaB-ddG | **ESM3ΔG** |
 |---|---|---|
@@ -160,7 +185,7 @@ dG = (dg * mask).sum(dim=-1) / valid       # masked-MEAN over 真实残基 → �
 
 ---
 
-## 8. 代码位置索引
+## 9. 代码位置索引
 
 **esm 库(`/home/guoj0f/share/esm`,editable)**
 - `esm/models/esm3.py:62-148` `EncodeInputs`(多轨道 embedding 相加);`:151-185` `OutputHeads`;`:267-389` `ESM3.forward`;`:353-356` 坐标切 N,CA,C + 建 affine
