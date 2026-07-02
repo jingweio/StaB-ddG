@@ -49,3 +49,12 @@
 4. clean 依赖把 task2 从 0.008 → 0.109(旧值近乎零) —— 污染依赖对 task2 影响尤其大。
 
 **结论**:两个任务都清干净依赖后,**per-structure 仍远低于 ProteinMPNN 0.448**,且 Megascale stage 有害。低分是真实方法性 gap,不是依赖问题。诊断/改进候选见 task1 §5(早停 / SUM 聚合 / 分解数值噪声)——属改设计,待用户拍板。
+
+### 5b. 早停诊断(2026-07-02,job 47954798,eval-only)
+| epoch | per-structure | overall Spearman |
+|---|---|---|
+| ep5 | 0.0756 | 0.1671 |
+| ep10 | 0.0532 | 0.2275 |
+| **ep15 (final)** | **0.1089** | 0.2542 |
+
+**结论:早停无用**,ep15 最优(per-structure 中途 ep10 还掉了一下,噪声)。与 task1 一致——gap 是真实方法限制,非过拟合。**且每个 epoch 处 overall 均低于 task1**,再次印证 Megascale stage 净负。csv:`results/eval_esm3dg_mega_skempi_aug1_ep{5,10}.csv`。
