@@ -17,7 +17,8 @@ Controlled: StaB 的 data / 两阶段 / ΔΔG loss / SKEMPI eval / split 全不�
 - **ENV (faithful to reference, rebuilt 2026-07-01):** py3.12.13 / torch2.6.0+cu124 / **transformers4.57.6** / **esm3.3.0 官方 main (commit cf002f1d)** / biotite1.7.1 / peft0.19.1；权重 `biohub/esm3-sm-open-v1`。（旧 py3.11+transformers5.12.1+esm-fork 环境不忠实、已弃。）
 - **Stage-1 HP:** **lr=5e-4** (canonical), AdamW, warmup_frac=0.05, cosine, **15 epochs**, batch_size=2000 tokens, per-epoch ckpt。(参考 MGnify 用 200 ep；我们 Megascale 用 15 ep + per-epoch ckpt，按 Stage-2 eval 判优，不足再延。)
   - ⚠️ **lr 历史:** 初始按参考 `config_esm3.py` 用 **lr=1e-3** (job 47933357) → **在忠实环境上发散** (mean train loss 连涨 1.11→2.52→2.67 @ep1-3, cosine lr 仍近峰值) → ep3 kill。**USER DECISION 2026-07-01 17:15: 降到 lr=5e-4 重跑** (job 47936491)。此发散在忠实环境复现,证明"1e-3 偏高"是真实信号、非旧环境伪影。
-- **Stage-2 HP (CONFIRMED):** lr=5e-4 (Stage-1 已证明稳、1e-3 发散), AdamW, warmup0.05, cosine, 15 ep, batch1000。**chain 两个 Stage-1 ckpt 做对比: ep11(train-loss min) vs ep15(final)**, 各跑 Stage-2+eval, 按 SKEMPI per-interface Spearman 挑最优 (USER 决定)。
+- **Stage-2 HP:** **lr=1e-5** (USER 决定 2026-07-03; = StaB `finetune.py` 默认值), AdamW, warmup0.05, cosine, 15 ep, batch1000。chain 两个 Stage-1 ckpt 对比: ep11(train-loss min) vs ep15(final), 各跑 Stage-2+eval, 按 per-interface Spearman 挑最优。
+  - ⚠️ **Stage-2 lr 历史:** 初用 **lr=5e-4**(照搬 Stage-1) → **binding-ddG 预测塌成 ~0**(pred std 0.005 vs true 1.9, per-iface Spearman **−0.05**, train loss 从 ep1 就 =mean(true²) 平在 ~6.35、15 ep 不降,低 lr 后期也不降) → 判定 5e-4 对 Stage-2(binding 小数据/迁移)偏高。USER 决定降到 **1e-5** 重跑;失败结果已清理。
 - **ensemble=1**（deterministic）；baseline 0.445 用 ProteinMPNN MC ensembling（口径差异，透明标注）。
 
 **Baselines:** ProteinMPNN two-stage **0.445** (per-iface) / 0.531 (overall)。
@@ -28,7 +29,7 @@ Controlled: StaB 的 data / 两阶段 / ΔΔG loss / SKEMPI eval / split 全不�
 - **env:** `esm-backbone` (py3.12, versions above); env python `/ibex/user/guoj0f/anaconda3/envs/esm-backbone/bin`. sbatch exports `HF_HOME=/ibex/user/guoj0f/share/hf_cache` + `HF_HUB_OFFLINE=1`.
 - **code+data:** `/ibex/user/guoj0f/StaB-ddG/esm-replace` (per-branch); esm code + weights in `/ibex/user/guoj0f/share`.
 - **sbatch:** `sh/{smoke_stage1,megascale_stage1}_esm3lora_20260701-141047.sh` (旧, lr1e-3); **canonical Stage-1 = `sh/megascale_stage1_esm3lora_lr5e4_20260701-171537.sh`** (lr5e-4)
-- **job ids:** GPU smoke `47932618` (DONE, loss 0.325 — Ibex faithful stack validated); Stage-1(lr1e-3) `47933357` (**DIVERGED @ep3, CANCELLED**); **Stage-1(lr5e-4) `47936491` (✅ COMPLETED, 11:57h, 15ep; train loss 0.355→谷底 0.163@ep10-11→0.188@ep15)**; **Stage-2 from ep11 `47955115`** + **Stage-2 from ep15 `47955122`**(dep afterok:47955115); eval 内联在各自 job(SKEMPI test, ensemble1); ablation 已取消。
+- **job ids:** GPU smoke `47932618` (DONE, loss 0.325 — Ibex faithful stack validated); Stage-1(lr1e-3) `47933357` (**DIVERGED @ep3, CANCELLED**); **Stage-1(lr5e-4) `47936491` (✅ COMPLETED, 11:57h, 15ep; train loss 0.355→谷底 0.163@ep10-11→0.188@ep15)**; **Stage-2 lr=5e-4 [ep11 `47955115` + ep15 `47955122`] ❌ FAILED**(pred 塌成~0, per-iface Spearman −0.05; 结果已清理) → **Stage-2 RETRY lr=1e-5 [ep11 `47980124` + ep15 `47980139`(dep afterok)]**; eval 内联(SKEMPI test, ensemble1); ablation 已取消。
 - **outputs:** Stage-1(lr5e-4) ckpts `runs/s1_esm3lora_lr5e4/esm3lora_s1_lr5e4_{epoch}.pt` (adapter-only ~13MB); 发散的 lr1e-3 run 在 `runs/s1_esm3lora/`。
 
 ## 4. Change log
@@ -39,12 +40,14 @@ Controlled: StaB 的 data / 两阶段 / ΔΔG loss / SKEMPI eval / split 全不�
 - 2026-07-01 17:15: **Stage-1(lr1e-3, 47933357) 发散** — mean train loss 连涨 1.11→2.52→2.67 (ep1-3), cosine lr 仍近峰值 → ep3 kill (CANCELLED, elapsed 2:33)。**USER DECISION: 降 lr→5e-4 重跑 = job `47936491`** (其余全同: AdamW/warmup0.05/cosine/15ep/batch2000, 独立 out dir `runs/s1_esm3lora_lr5e4`)。此发散在**忠实环境复现**,坐实"1e-3 偏高"为真实信号,非旧环境伪影。
 - 2026-07-02 12:22: **Stage-1(lr5e-4, 47936491) ✅ COMPLETED** (11:57h, 15 epoch)。train loss **单调下降到 ep10-11 触底 0.163**,之后随 cosine lr→0 微升到 ep15 的 0.188。健康收敛(对比发散的 lr1e-3)。15 个 per-epoch adapter ckpt 全存于 `runs/s1_esm3lora_lr5e4/`。⚠️ **ep15 非 train-loss 最优(ep10/11 才是)** → Stage-2 chain 的 ckpt 待定(ep11 vs ep15 vs 都测,见下)。
 - 2026-07-02 13:15: 提交 **Stage-2** — 从 Stage-1 **ep11(`47955115`)** + **ep15(`47955122`, dep afterok)** 各跑一次 SKEMPI binding 微调(lr5e-4/AdamW/warmup0.05/cosine/15ep/batch1000) + 内联 eval(SKEMPI test, ensemble1)。**Ablation 取消**(USER: 只做纯两阶段, 验证 ProteinMPNN→ESM3 替换效果)。发射前已核对数据: SKEMPI2_PDBs=746 真实目录(非软链)、test split 就位。用 afterok 依赖串行避免两 job 并发建 pdb_dict cache 撞车。
+- 2026-07-03 01:58: **Stage-2 lr=5e-4 失败** — ep11(`47955115`) 跑完 15ep, **binding-ddG 预测塌成 ~0**(pred std 0.0054 vs true 1.91, 整体 Spearman −0.06, **per-iface Spearman −0.055** n=81; train loss 从 ep1=5.60≈mean(true²) 一路平在 ~6.35, 低 lr 后期也不降); ep15(`47955122`) 同样平线。判定**非单纯 lr、更像 binding 信号被稀释/迁移被破坏**。**USER 决定: 降 lr→1e-5 重跑**(=StaB 默认)。停 ep15、**清理失败 s2 结果**(runs/s2_esm3lora_fromEp11/15 + logs, 本地+Ibex; Stage-1 保留)。重投 **lr=1e-5: ep11 `47980124` + ep15 `47980139`(dep afterok)**, 命名带 `lr1e5` 与旧严格隔离。附注: eval 有多个大 complex **CUDA-OOM 被跳过**(次要, 待修)。
 
 ## 5. Results (fill AFTER jobs)
 | stage / config | job id | per-iface Spearman | overall | notes |
 |---|---|---:|---:|---|
 | ProteinMPNN two-stage (baseline) | — | 0.445 | 0.531 | 旧 RESULTS.md，未重跑 |
-| ESM3 LoRA+head two-stage (from Stage-1 ep11) | 47955115 | _pending_ | | esm3_stab, faithful env |
-| ESM3 LoRA+head two-stage (from Stage-1 ep15) | 47955122 | _pending_ | | esm3_stab, faithful env |
+| ESM3 LoRA+head two-stage lr=5e-4 (ep11/ep15) | 47955115/22 | **−0.05** | ~0 | ❌ 预测塌成~0, 结果已清理 |
+| ESM3 LoRA+head two-stage **lr=1e-5** (from ep11) | 47980124 | _pending_ | | esm3_stab, retry |
+| ESM3 LoRA+head two-stage **lr=1e-5** (from ep15) | 47980139 | _pending_ | | esm3_stab, retry |
 
 (pending)
