@@ -130,12 +130,30 @@ python stability_finetune.py \
 
 ---
 
-## 文件清单(本次新增于 `reproduce/`)
+## 文件清单 / 目录索引(`reproduce/` 当前布局)
 
 ```
 reproduce/
-├── MODULES.md            # 方法 + 核心模块梳理(含讨论细节)
-├── COMMANDS.md           # 本文件:可执行复现命令
-├── compute_metrics.py    # 指标计算 + baseline 对比脚本
-└── results_summary.txt   # 本次复现的指标输出
+├── MODULES.md                       # 方法 + 核心模块梳理(含讨论细节)
+├── COMMANDS.md                      # 本文件:可执行复现命令
+├── compute_metrics.py               # 指标计算 + baseline 对比脚本(被上文命令引用)
+├── results_summary.txt              # 本次复现(方案 B)的指标输出
+│
+│   # —— 按“突变位点数”分层的分析脚本 ——
+├── analyze_mutation_sites.py        # 分布(train/test/full)+ 每档 test 性能
+├── analyze_nsites_debiased.py       # 去偏分层:NRMSE/NMAE/R²/slope 等 scale-free 指标
+├── analyze_nsites_per_interface.py  # per-interface(复合物内再跨复合物平均)分层指标
+│
+│   # —— 监控 / infra 小工具 ——
+├── heartbeat.py                     # finetune 进度一行摘要(Monitor 小时级调用)
+├── probe_batch_size.py              # 探测能跑通每个 SKEMPI 训练复合物的最大 batch_size
+│
+│   # —— 专题子目录 ——
+├── mutation-analysis/               # mutation-cliff 分析:脚本 + 图(png)+ results.json + md
+├── dG-ddG-sign-note/                # dG/ddG 符号约定梳理与验证(dG-ddG-sign-conventions.md)
+└── sidechain-usage-note/            # 结构输入是否含/用 side-chain 的梳理(sidechain-usage.md)
 ```
+
+> 注:上面这些脚本假设**从 repo 根目录运行**(如 `python reproduce/compute_metrics.py ...`);
+> `analyze_*.py` / `compute_metrics.py` 内部用 `dirname(dirname(__file__))` 定位 repo 根,
+> 因此**保持在 `reproduce/` 顶层**,移入子目录需同步改路径。
