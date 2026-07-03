@@ -23,6 +23,7 @@
 
 ## 4. Change log (LIVE)
 - 2026-07-03 02:47:plan 写入;mega_splits test=28、数据在 branch 已确认;待写两个 eval 代码 + 本地 smoke。
+- 2026-07-03 03:0x:两个 eval 写好、本地 smoke 通过(1a ESM3dG 3DKM sp=0.33;1b ProteinMPNN 全 test per-domain **0.755**/overall 0.677 @mc=1,28 domains ~51k mutants)。esm3dg env 可同时 import stabddg(1b 无需单独 env)✓。代码同步 Ibex;**提交 job 47982066**(a100),1a max_batch=32、1b mc=20,RUNNING。status: RUNNING。
 
 ## 5. Results (jobs 完成后填)
 - _待填:1a vs 1b 的 per-domain / overall Spearman 对比表;结论:ESM3dG 部署是否 sane、zero-shot transfer 到 Megascale 的能力 vs Megascale-finetuned ProteinMPNN。_

@@ -20,6 +20,7 @@
 
 ## 4. Change log (LIVE)
 - 2026-07-03 02:47:plan 写入;结构/数据核实完毕(1862 结构 0 缺失);待写 eval 代码 + 本地 smoke。
+- 2026-07-03 03:0x:`eval_mgnify.py` 写好、本地 smoke(8 行×3 成员)通过(scaled Spearman 0.93/RMSE 0.51,量级对);1862 结构 + index csv 同步 Ibex;**提交 job 47982065**(a100,esm3dg env),RUNNING。status: RUNNING。
 
 ## 5. Results (job 完成后填)
 - _待填:overall Spearman/Pearson/RMSE(scaled + raw)vs paper 0.87/0.80;per-member;结论:部署是否正确。_

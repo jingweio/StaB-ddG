@@ -36,4 +36,15 @@ test split 3283 行(1862 WT + 1421 mutant)只需 **1862 个唯一 scaffold 结�
 ### [AUTO] D7 — mutant 序列 thread 到 scaffold 结构(both tasks)
 Megascale/MGnify 的 mutant 都是 point mutation、与 scaffold 等长,按数据集设计 thread 到母体 AF2/ESMFold 结构(见结构说明文档 §7)。encode(CSV seq, scaffold coords)。加等长断言。
 
-_(后续新决策继续往下追加)_
+### [AUTO] D8 — task1 的 1a 与 1b 合并到同一个 job(串行)
+1a(ESM3dG)+1b(ProteinMPNN)都在 Megascale test、数据小,放同一 sbatch 串行跑,省一次排队。本地已验证 `esm3dg` env 能同时 import `stabddg`(ProteinMPNN 依赖轻),故 1b 无需单独 env。
+
+### [AUTO] D9 — max_batch(1a)=32、MC(1b)=20
+1a ESM3dG:a100-80GB 上 small domain 用 max_batch 32(带 OOM→减半 fallback);1b:mc=20(matching run_stabddg 默认)。
+
+## 进度快照(2026-07-03 03:0x)
+- 结构 copy(1862/22MB)、代码、sbatch 全部本地验证 + 同步 Ibex。
+- **提交:Task2 job 47982065(mgnify 复现)、Task1 job 47982066(megascale 对比)——均 RUNNING(秒级 backfill)。**
+- 本地 smoke 预览数(非最终):task2 scaled Spearman 0.93/RMSE 0.51(n=8);task1 ProteinMPNN per-domain 0.755(mc=1 全 test)。等 Ibex 全量结果。
+
+_(后续新决策/结果继续往下追加)_
