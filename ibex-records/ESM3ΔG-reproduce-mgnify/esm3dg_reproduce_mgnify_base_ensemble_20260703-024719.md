@@ -22,5 +22,22 @@
 - 2026-07-03 02:47:plan 写入;结构/数据核实完毕(1862 结构 0 缺失);待写 eval 代码 + 本地 smoke。
 - 2026-07-03 03:0x:`eval_mgnify.py` 写好、本地 smoke(8 行×3 成员)通过(scaled Spearman 0.93/RMSE 0.51,量级对);1862 结构 + index csv 同步 Ibex;**提交 job 47982065**(a100,esm3dg env),RUNNING。status: RUNNING。
 
-## 5. Results (job 完成后填)
-- _待填:overall Spearman/Pearson/RMSE(scaled + raw)vs paper 0.87/0.80;per-member;结论:部署是否正确。_
+## 5. Results (COMPLETED 2026-07-03;job 47982065,a100,elapsed 20:06)
+
+**MGnify test(3283 seqs,base 3-member ensemble):**
+
+| 指标 | 我们(ensemble)| paper ESM3ΔG | 判定 |
+|---|---|---|---|
+| **Spearman (scaled)** | **0.8718** | **~0.87** | ✅ **精准复现** |
+| Spearman (raw) | 0.8713 | — | — |
+| Pearson (scaled/raw) | 0.7544 / 0.7834 | — | — |
+| **RMSE kcal/mol (scaled)** | **1.579** | **0.80** | ⚠️ ~2× 偏高 |
+| RMSE (raw / offset-removed scaled) | 1.447 / 1.555 | — | — |
+| 单成员 scaled Spearman | 0.8697 / 0.8674 / 0.8626 | — | ensemble 略升 |
+
+- csv 留证:`results/eval_mgnify_test_base_ens.csv`(3283 行:name/PDB_name/label_dG/pred_scaled/pred_raw)。
+
+**判读:**
+1. **✅ 部署正确(排序侧)**:Spearman **0.872 ≈ paper 0.87**,几乎精准复现 → 我们的 pretrained ESM3dG 部署(模型代码 / 权重 strict 加载 / 结构编码 / scaled masked-mean 聚合 / base 3-ens)是**对的**。这是本次验证最想确认的点,通过。
+2. **⚠️ 绝对校准偏高(RMSE 1.58 vs 0.80)**,offset-removed 仍 1.55(非单纯常数偏移;Pearson 0.75 < Spearman 0.87 说明有非线性/尺度错配)。**最可能原因:结构来源不同** —— paper 用 **AlphaFold2** 结构,我们用 **ESMFold2-Fast**(用户预测)。不同折叠器 → 绝对 dG 尺度漂移,但排序稳健(Spearman 不变)。**这是 caveat 而非部署 bug**;手上无 MGnify 的 AF2 结构可直接对照,故列为**待验证假设**。
+3. **⚠️ 潜在决策点(等用户)**:若要复现 RMSE 0.80,需 (a) 用 AF2 结构重预测/下载,或 (b) 对 scaled 输出做一次 test 上的线性重标定(paper 对实验数据提过 "after removing a global offset")。属改设计,不在自主窗口内动。
