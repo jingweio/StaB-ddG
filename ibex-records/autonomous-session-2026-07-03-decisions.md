@@ -47,4 +47,23 @@ Megascale/MGnify 的 mutant 都是 point mutation、与 scaffold 等长,按数�
 - **提交:Task2 job 47982065(mgnify 复现)、Task1 job 47982066(megascale 对比)——均 RUNNING(秒级 backfill)。**
 - 本地 smoke 预览数(非最终):task2 scaled Spearman 0.93/RMSE 0.51(n=8);task1 ProteinMPNN per-domain 0.755(mc=1 全 test)。等 Ibex 全量结果。
 
+## ✅ 最终结果(2026-07-03,两任务均 COMPLETED)
+
+**Task2 — MGnify 复现(job 47982065,20min):**
+- scaled **Spearman 0.8718 ≈ paper 0.87** → **部署正确(排序侧)已验证**。
+- RMSE 1.58 vs paper 0.80(~2×,offset-removed 1.55)→ 疑因**结构来源 ESMFold2(ours) vs AF2(paper)**,尺度漂移、排序稳健。列为待验证假设(手上无 MGnify AF2 结构对照)。
+
+**Task1 — Megascale test 对比(job 47982066,43min):**
+| | 1a ESM3dG(zero-shot) | 1b ProteinMPNN-stage1(Megascale-finetuned) |
+|---|---|---|
+| per-domain Spearman | **0.7715** | 0.7690 |
+| overall Spearman | 0.6081 | 0.6983 |
+- per-domain **打平**(ESM3dG zero-shot 竟≈ Megascale 专家)→ 部署 sane + 迁移强;overall ProteinMPNN 占优(per-domain强/overall弱,同 SKEMPI pattern)。
+
+**总结论:两个独立验证都表明 pretrained ESM3dG 部署正确**(Task2 精准复现 paper Spearman;Task1a zero-shot 迁移与 Megascale 专家持平)。
+
+## 过程备注(供排查)
+- [PROC] monitor 首次因 sbatch 内 1a/1b **各打印一次 `===== DONE =====`** 被首个 DONE 提前触发退出;已重挂"job 离队(sacct COMPLETED)"判定的 monitor 补捕 1b 结果,无数据损失。教训:多步 sbatch 的 monitor 退出条件应用 job-gone,而非中间 DONE 字符串。
+- 全程未碰 esm-replace / 别 task 的 env/job;结构仅 copy test 需要的 1862 个进 branch;所有代码本地 smoke 后才上 Ibex。
+
 _(后续新决策/结果继续往下追加)_
