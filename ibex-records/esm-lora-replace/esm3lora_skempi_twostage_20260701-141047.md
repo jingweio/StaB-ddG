@@ -41,13 +41,14 @@ Controlled: StaB 的 data / 两阶段 / ΔΔG loss / SKEMPI eval / split 全不�
 - 2026-07-02 12:22: **Stage-1(lr5e-4, 47936491) ✅ COMPLETED** (11:57h, 15 epoch)。train loss **单调下降到 ep10-11 触底 0.163**,之后随 cosine lr→0 微升到 ep15 的 0.188。健康收敛(对比发散的 lr1e-3)。15 个 per-epoch adapter ckpt 全存于 `runs/s1_esm3lora_lr5e4/`。⚠️ **ep15 非 train-loss 最优(ep10/11 才是)** → Stage-2 chain 的 ckpt 待定(ep11 vs ep15 vs 都测,见下)。
 - 2026-07-02 13:15: 提交 **Stage-2** — 从 Stage-1 **ep11(`47955115`)** + **ep15(`47955122`, dep afterok)** 各跑一次 SKEMPI binding 微调(lr5e-4/AdamW/warmup0.05/cosine/15ep/batch1000) + 内联 eval(SKEMPI test, ensemble1)。**Ablation 取消**(USER: 只做纯两阶段, 验证 ProteinMPNN→ESM3 替换效果)。发射前已核对数据: SKEMPI2_PDBs=746 真实目录(非软链)、test split 就位。用 afterok 依赖串行避免两 job 并发建 pdb_dict cache 撞车。
 - 2026-07-03 01:58: **Stage-2 lr=5e-4 失败** — ep11(`47955115`) 跑完 15ep, **binding-ddG 预测塌成 ~0**(pred std 0.0054 vs true 1.91, 整体 Spearman −0.06, **per-iface Spearman −0.055** n=81; train loss 从 ep1=5.60≈mean(true²) 一路平在 ~6.35, 低 lr 后期也不降); ep15(`47955122`) 同样平线。判定**非单纯 lr、更像 binding 信号被稀释/迁移被破坏**。**USER 决定: 降 lr→1e-5 重跑**(=StaB 默认)。停 ep15、**清理失败 s2 结果**(runs/s2_esm3lora_fromEp11/15 + logs, 本地+Ibex; Stage-1 保留)。重投 **lr=1e-5: ep11 `47980124` + ep15 `47980139`(dep afterok)**, 命名带 `lr1e5` 与旧严格隔离。附注: eval 有多个大 complex **CUDA-OOM 被跳过**(次要, 待修)。
+- 2026-07-03 07:32: **lr=1e-5 ep11(`47980124`) 自行跑完 15ep** — **修正 ep4 的过早判断: lr 确实有影响**。predictions 不再全塌(**pred std 0.21** vs lr5e-4 的 0.005), **per-iface Spearman −0.05 → +0.10**, train loss 缓降 6.73→**6.12**(min ep11-12, ep15 略回 6.21)。**但 0.10 ≪ 0.445, 且 loss 到 ep15 仍在降 → lr=1e-5 下 15ep 欠训**。ep15(`47980139`) 被 USER 暂停(CANCELLED, 部分)。**USER 评估下一步中**。候选: 更多 epoch / 中间 lr(5e-5~1e-4) / 加绝对-ΔG 锚 / debug binding 信号稀释。
 
 ## 5. Results (fill AFTER jobs)
 | stage / config | job id | per-iface Spearman | overall | notes |
 |---|---|---:|---:|---|
 | ProteinMPNN two-stage (baseline) | — | 0.445 | 0.531 | 旧 RESULTS.md，未重跑 |
 | ESM3 LoRA+head two-stage lr=5e-4 (ep11/ep15) | 47955115/22 | **−0.05** | ~0 | ❌ 预测塌成~0, 结果已清理 |
-| ESM3 LoRA+head two-stage **lr=1e-5** (from ep11) | 47980124 | _pending_ | | esm3_stab, retry |
-| ESM3 LoRA+head two-stage **lr=1e-5** (from ep15) | 47980139 | _pending_ | | esm3_stab, retry |
+| ESM3 LoRA+head two-stage **lr=1e-5** (from ep11) | 47980124 | **0.10** | 0.10 | ⚠️弱/欠训: pred std 0.21, train loss 仍在降(min ep11-12); ≪0.445 |
+| ESM3 LoRA+head two-stage **lr=1e-5** (from ep15) | 47980139 | — | | CANCELLED(user 暂停), 部分 |
 
 (pending)
