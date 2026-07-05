@@ -3,7 +3,7 @@
 #SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=96G
-#SBATCH --time=2:00:00
+#SBATCH --time=1:00:00
 #SBATCH --output=/ibex/user/guoj0f/StaB-ddG/MGnify-replace/ibex-records/megascale-evaluation-comparison/megascale_1a_esm3dg_scaled_20260705-143351_%j.out
 #SBATCH --error=/ibex/user/guoj0f/StaB-ddG/MGnify-replace/ibex-records/megascale-evaluation-comparison/megascale_1a_esm3dg_scaled_20260705-143351_%j.err
 # Task1a RE-RUN: ESM3dG (base 3-ens) on Megascale test, now reporting scaled(primary)+raw.
