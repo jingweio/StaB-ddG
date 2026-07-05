@@ -22,9 +22,12 @@
 StaB 无独立 megascale-eval;`stability_finetune.py:validation_step` 正是逐 domain `folding_ddG`→per-domain Spearman + overall。ProteinMPNN 稳定性模型本身随机(随机 decoding order + backbone noise),StaB 报告级数字用 `run_stabddg.py` 的 **20× MC ensemble**。故 1b 用 **20× MC**(matching StaB 默认)。
 - **影响**:1a(ESM3dG)是确定性 3 成员 ensemble,1b(ProteinMPNN)是 20× 随机 MC ——两种 ensemble 风格不同,但各自代表其"报告级"配置。对比时会明确标注这个不对称。
 
-### [AUTO] D4 — Task2 报 scaled(校准)绝对 dG 为主,raw 作交叉核对
-paper 报 RMSE 0.80 kcal/mol → 预测须在物理量程 → 用 **SigmoidScaling 校准后的 scaled 输出**(`sigmoid_on=True` 等价:逐残基 sigmoid 后再 masked-mean)。Spearman 对 raw/scaled 都近似,但为对齐 RMSE 用 scaled;同时也报 raw-mean 的 Spearman 交叉核对。
-- **影响**:与我们 ddG pipeline(用 raw)不同,但那是 ddG;此处是复现绝对 dG,scaled 才对得上 paper 口径。
+### [AUTO] D4 — Task2 报 scaled + raw 双份 ⚠️ 口径已纠正(2026-07-05)
+**原 D4(有误)**:我以为复现绝对 dG 要用 scaled(校准)输出为主。
+**纠正**:核实 absolute-stability-predictor 的 notebook(`ESM3dG.ipynb`)后确认——**paper 的 MGnify-test dG-prediction 口径是 RAW**:`ESM3dG_predict(...)` 默认 `sigmoid_on=False` → 用 `pred_dg_avg`(raw masked-mean),不是 scaled。(ddG-scanning 才用 scaled。)
+- **幸好我 scaled+raw 都报了**,正确对齐数(raw):**Spearman 0.8713 ≈ paper 0.87(更干净)**、RMSE 1.447(仍 ~1.8× 偏高)。
+- **结论不变**:部署正确(Spearman);RMSE 偏差与 scaled/raw 无关(SigmoidScaling 在 [0,4] 恒等,scaled≈raw),**结构来源假设 ESMFold2 vs AF2 依旧成立**。
+- **训练口径(dG/ddG loss 用 scaled 还是 raw)无法代码确认**:absolute-stability-predictor 未发布 training loop;仅从 checkpoint 命名 `..dg_and_ddg_sigmoid..ddg_bins..`(dG+ddG 联合、含 sigmoid、ddG 疑分箱)推断 dG loss 很可能建在 scaled 上、ddG 处理不明——待原作者确认。
 
 ### [AUTO] D5 — 只 copy test 需要的 1862 个结构进 branch(非全量 6.9G)
 test split 3283 行(1862 WT + 1421 mutant)只需 **1862 个唯一 scaffold 结构**(mutant thread 到母体),共 22.2MB,全部命中 0 缺失。按 §1c-3 copy 进 `data/mgnify/structures_test/`(gitignored)。
