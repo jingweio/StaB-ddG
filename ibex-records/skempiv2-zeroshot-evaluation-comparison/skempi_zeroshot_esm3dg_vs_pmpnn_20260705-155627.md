@@ -11,9 +11,12 @@
 **三个 zero-shot 模型(都在 SKEMPI test binding ddG 上,无 SKEMPI 训练):**
 | id | 模型 | 构造 | 口径/集成 |
 |---|---|---|---|
-| **A** | ESM3dG base 3-ens | multi-chain **直接拼接**(现 struct_to_seq_coords)| **raw**,3 成员平均 |
-| **B** | ESM3dG base 3-ens | multi-chain **chainbreak**(`\|` + 每 pipe 一行 NaN atom37)| **raw**,3 成员平均 |
+| **A** | ESM3dG base 3-ens | multi-chain **直接拼接**(concat)| **raw**,3 成员平均 |
+| **B1** | ESM3dG base 3-ens | **chainbreak**(`\|`+NaN),`\|` **计入** mean(官方 ESM3dG 原样,default)| **raw**,3 成员平均 |
+| **B2** | ESM3dG base 3-ens | **chainbreak**,`\|` **mask 掉**(不计入 mean,`--mask_pipe`)| **raw**,3 成员平均 |
 | **C** | ProteinMPNN stage-1 `stability_finetuned.pt` | 原生 chain-aware | 20× MC(StaB skempi_eval.py)|
+
+> **B1 vs B2(用户 2026-07-05 要求"两个都试")**:chainbreak 的 `\|` 位置该不该计入 masked-mean 无官方先例(ESM3 无 mean;ESM3dG 官方多链是 concat、从不用 `\|`)。B1=官方 ESM3dG 原样(计入,最小偏离);B2=把 `\|` mask 掉(更"只平均真实残基")。两者都跑,实测差异(预期极小,~0.5% 稀释)。concat(A)无 `\|`,不受影响。
 
 **KEY DECISIONS:**
 - **模型型号**:ESM3dG = **base 3 成员 ensemble**(weights_1/2/3),沿用 [[let-user-decide-model-config-choices]] 里 D1 的"原始 ESM3dG=base 3-ens"。ProteinMPNN = `model_ckpts/stability_finetuned.pt`(= Megascale stage-1,**未训 SKEMPI = zero-shot**)。
@@ -37,7 +40,9 @@
 - sbatch:`ibex-records/skempiv2-zeroshot-evaluation-comparison/sh/…_20260705-155627.sh`。
 
 ## 4. Change log (LIVE)
-- 2026-07-05 15:56:调研 workflow 完成(chainbreak 验证 CORRECT);plan 写入;project dir 建好。待编码 + 本地 smoke。
+- 2026-07-05 15:56:调研 workflow 完成(chainbreak 验证 CORRECT);plan 写入;project dir 建好。
+- 2026-07-05 16:xx:代码写好、两 variant 本地 smoke 通过;撤销非官方 mask-out(follow 官方);弃用 0.158 参照。提交 **3 job**:48071431(A concat)/ 48071432(B1 chainbreak mask-in 官方)/ 48071433(C ProteinMPNN 20×MC),均 RUNNING。
+- 2026-07-05 16:xx:用户要求"两个都试"→ 加 `--mask_pipe` 可选 flag(default off),提交 **第 4 job 48071517**(B2 chainbreak mask-out)。4 job 全部 submitted。status: RUNNING。
 
 ## 5. Results (jobs 完成后填)
 - _待填:A/B/C 的 per-structure(THRESHOLD=10)+ overall Spearman/Pearson 对比表;concat vs chainbreak 差异;vs baseline 0.448 / vs ESM3dG-finetuned 0.158;结论(zero-shot 折叠→binding 迁移能力 + chainbreak 是否有用)。_
