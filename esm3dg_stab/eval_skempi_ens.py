@@ -24,8 +24,8 @@ from skempi_data import build_skempi
 from finetune import chunked_binding_ddG   # NOTE: load_adapters intentionally NOT used (zero-shot)
 
 
-def eval_member(ckpt, data_dir, split, batch_tokens, max_batch, limit, chainbreak, dev):
-    scorer = ESM3dGScorer(ckpt, device=dev, trainable=False)   # base ckpt => zero-shot; NO load_adapters
+def eval_member(ckpt, data_dir, split, batch_tokens, max_batch, limit, chainbreak, mask_pipe, dev):
+    scorer = ESM3dGScorer(ckpt, device=dev, trainable=False, mask_pipe=mask_pipe)   # base => zero-shot; NO load_adapters
     items = build_skempi(scorer,
         csv_path=os.path.join(data_dir, "SKEMPI", "filtered_skempi.csv"),
         split_path=os.path.join(data_dir, "SKEMPI", f"{split}_pdb.pkl"),
@@ -56,6 +56,7 @@ def main():
     ap.add_argument("--data_dir", default=os.path.join(HERE, "..", "data"))
     ap.add_argument("--split", default="test")
     ap.add_argument("--chainbreak", action="store_true", help="variant b: '|' chainbreak between chains")
+    ap.add_argument("--mask_pipe", action="store_true", help="A/B: exclude '|' from masked-mean (default off=official ESM3dG mean)")
     ap.add_argument("--batch_tokens", type=int, default=4000)
     ap.add_argument("--max_batch", type=int, default=4)
     ap.add_argument("--limit", type=int, default=None)
@@ -63,10 +64,10 @@ def main():
     args = ap.parse_args()
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     members = [m.strip() for m in args.members.split(",") if m.strip()]
-    variant = "chainbreak" if args.chainbreak else "concat"
+    variant = ("chainbreak" if args.chainbreak else "concat") + ("+maskpipe" if args.mask_pipe else "")
 
     per = [eval_member(ck, args.data_dir, args.split, args.batch_tokens, args.max_batch,
-                       args.limit, args.chainbreak, dev) for ck in members]
+                       args.limit, args.chainbreak, args.mask_pipe, dev) for ck in members]
     names = sorted(set.intersection(*[set(p.keys()) for p in per]))   # complexes present in ALL members
     rows, per_struct2, allp, alll = [], [], [], []
     for nm in names:

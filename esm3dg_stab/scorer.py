@@ -18,7 +18,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import torch
-from esm3dg_model import ESM3dG, tied_featurize, get_esm3_input_info_direct
+from esm3dg_model import ESM3dG, tied_featurize, get_esm3_input_info_direct, SEQUENCE_VOCAB
+
+_PIPE = SEQUENCE_VOCAB.index("|")   # SEQUENCE_CHAINBREAK_TOKEN = 31
 
 
 def is_adapter_name(name):
@@ -29,8 +31,12 @@ def is_adapter_name(name):
 
 
 class ESM3dGScorer:
-    def __init__(self, lora_ckpt, device="cuda", trainable=False):
+    def __init__(self, lora_ckpt, device="cuda", trainable=False, mask_pipe=False):
         self.device = device
+        # mask_pipe: if True, EXCLUDE chainbreak '|'(token 31) from the masked-mean folding_dG.
+        # Default False = ESM3dG's unmodified masked-mean (official; '|' kept as interior token).
+        # This flag exists ONLY to A/B the two chainbreak-aggregation choices; concat has no '|'.
+        self.mask_pipe = mask_pipe
         # build ESM3ΔG; freeze_weights=False so grads CAN flow, then we選擇性解冻
         class _Cfg:
             training = type("o", (), {"rank": 4, "dropout": 0.15})()
@@ -106,6 +112,8 @@ class ESM3dGScorer:
         dg, scaled_dg, mask = self.model(batch)          # dg,scaled_dg:[B,L] per-residue, mask:[B,L]
         vals = scaled_dg if scaled else dg
         mask = mask.to(vals.dtype)
+        if self.mask_pipe:                               # optional A/B: also drop chainbreak '|'
+            mask = mask * (seq_tokens.to(mask.device) != _PIPE).to(mask.dtype)
         valid = mask.sum(dim=-1).clamp_min(1.0)
         dG = (vals * mask).sum(dim=-1) / valid           # [B] masked mean (ESM3dG convention: excl cls/eos)
         return dG
@@ -119,6 +127,8 @@ class ESM3dGScorer:
         self.model.ddg_scanning = False
         dg, scaled_dg, mask = self.model(batch)
         m = mask.to(dg.dtype)
+        if self.mask_pipe:
+            m = m * (seq_tokens.to(m.device) != _PIPE).to(m.dtype)
         valid = m.sum(dim=-1).clamp_min(1.0)
         raw = (dg * m).sum(dim=-1) / valid
         scl = (scaled_dg * m).sum(dim=-1) / valid
