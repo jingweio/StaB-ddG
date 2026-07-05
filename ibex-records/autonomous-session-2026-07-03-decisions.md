@@ -22,7 +22,10 @@
 StaB 无独立 megascale-eval;`stability_finetune.py:validation_step` 正是逐 domain `folding_ddG`→per-domain Spearman + overall。ProteinMPNN 稳定性模型本身随机(随机 decoding order + backbone noise),StaB 报告级数字用 `run_stabddg.py` 的 **20× MC ensemble**。故 1b 用 **20× MC**(matching StaB 默认)。
 - **影响**:1a(ESM3dG)是确定性 3 成员 ensemble,1b(ProteinMPNN)是 20× 随机 MC ——两种 ensemble 风格不同,但各自代表其"报告级"配置。对比时会明确标注这个不对称。
 
-### [AUTO] D4 — Task2 报 scaled + raw 双份 ⚠️ 口径已纠正(2026-07-05)
+### [AUTO] D4 — Task2 报 scaled + raw 双份 ⚠️⚠️ 口径二次纠正(2026-07-05,以 paper Methods 为准 = scaled)
+**最终认定(权威来源 MGnify.pdf Methods "Fine-Tuning with a Sigmoid-Corrected Stability Head"):** sigmoid correction 层**按数据集类型开关**——**cDNA 数据集(=MGnify)推理时 sigmoid 开 = scaled**;非 cDNA(量热/宽量程)才 bypass=raw。故 **MGnify-test 复现口径 = SCALED**。→ **我最初 D4(scaled)正确;中间基于 notebook 默认 sigmoid_on=False 改成 raw 是过度纠正、已作废。** 对齐 paper 用 **scaled:Spearman 0.8718≈0.87 ✓**;RMSE 1.58(scaled)/1.45(raw)都远于 0.80 → 与口径无关,结构来源(ESMFold2 vs AF2)假设成立。
+**训练 loss(paper 明确)**:`L = 0.3·(ΔG_pred,mut−ΔG_true,mut)² + 0.3·(ΔG_pred,WT−ΔG_true,WT)² + 1.0·(ΔΔG_pred−ΔΔG_true)²`,ΔΔG_pred=ΔG_mut−ΔG_WT;在 MGnify(cDNA)上训 → sigmoid 开 → 三项都建在 scaled 输出上。base=3 次独立训练 ensemble(对上 D1)。
+--- 以下为历史记录(已被上面覆盖)---
 **原 D4(有误)**:我以为复现绝对 dG 要用 scaled(校准)输出为主。
 **纠正**:核实 absolute-stability-predictor 的 notebook(`ESM3dG.ipynb`)后确认——**paper 的 MGnify-test dG-prediction 口径是 RAW**:`ESM3dG_predict(...)` 默认 `sigmoid_on=False` → 用 `pred_dg_avg`(raw masked-mean),不是 scaled。(ddG-scanning 才用 scaled。)
 - **幸好我 scaled+raw 都报了**,正确对齐数(raw):**Spearman 0.8713 ≈ paper 0.87(更干净)**、RMSE 1.447(仍 ~1.8× 偏高)。

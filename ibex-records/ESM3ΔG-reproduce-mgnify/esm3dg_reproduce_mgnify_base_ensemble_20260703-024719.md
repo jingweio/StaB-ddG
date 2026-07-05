@@ -39,6 +39,6 @@
 
 **判读:**
 1. **✅ 部署正确(排序侧)**:Spearman **0.87 ≈ paper 0.87**,几乎精准复现 → 我们的 pretrained ESM3dG 部署(模型代码 / 权重 strict 加载 / 结构编码 / masked-mean 聚合 / base 3-ens)是**对的**。这是本次验证最想确认的点,通过。
-   - **⚠ 口径订正(2026-07-05)**:核实原版 notebook 后确认 **paper 的 dG-prediction 口径是 RAW**(`ESM3dG_predict` 默认 `sigmoid_on=False` → `pred_dg_avg`),不是 scaled。所以对齐 paper 应看 **raw:Spearman 0.8713 ≈ 0.87**(更干净)。scaled(0.8718)只差在两端软钳、几乎一样。详见决策日志 D4。
+   - **⚠ 口径二次订正(2026-07-05,以 paper Methods 为准)**:查 MGnify.pdf Methods 确认——sigmoid correction 层**按数据集开关**:**cDNA 数据集(=MGnify)推理时 sigmoid 开 = SCALED**(钳进 cDNA 的 [-1,5] 量程),非 cDNA 才 bypass=raw。故 **MGnify-test 口径 = scaled:Spearman 0.8718 ≈ 0.87 ✓**。(我中途曾据 notebook 默认 sigmoid_on=False 误改为 raw,现依 paper 纠回 scaled;两者 Spearman 几乎一样,不影响结论。)训练 loss = `0.3·mutΔG² + 0.3·wtΔG² + 1.0·ΔΔG²`(MSE),在 cDNA 上训 → sigmoid 开。详见决策日志 D4。
 2. **⚠️ 绝对校准偏高(RMSE 1.58 vs 0.80)**,offset-removed 仍 1.55(非单纯常数偏移;Pearson 0.75 < Spearman 0.87 说明有非线性/尺度错配)。**最可能原因:结构来源不同** —— paper 用 **AlphaFold2** 结构,我们用 **ESMFold2-Fast**(用户预测)。不同折叠器 → 绝对 dG 尺度漂移,但排序稳健(Spearman 不变)。**这是 caveat 而非部署 bug**;手上无 MGnify 的 AF2 结构可直接对照,故列为**待验证假设**。
 3. **⚠️ 潜在决策点(等用户)**:若要复现 RMSE 0.80,需 (a) 用 AF2 结构重预测/下载,或 (b) 对 scaled 输出做一次 test 上的线性重标定(paper 对实验数据提过 "after removing a global offset")。属改设计,不在自主窗口内动。
