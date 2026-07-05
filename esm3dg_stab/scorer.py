@@ -110,6 +110,20 @@ class ESM3dGScorer:
         dG = (vals * mask).sum(dim=-1) / valid           # [B] masked mean
         return dG
 
+    def folding_dG_both(self, enc, seq_tokens):
+        """Return (raw_dG, scaled_dG) [B] from ONE forward — masked-mean of dg and scaled_dg.
+        Used by the Megascale eval to report both口径 without doubling forwards."""
+        B = seq_tokens.shape[0]
+        batch = [{"seq": seq_tokens[i], "struct": enc["struct"], "coord": enc["coord"]}
+                 for i in range(B)]
+        self.model.ddg_scanning = False
+        dg, scaled_dg, mask = self.model(batch)
+        m = mask.to(dg.dtype)
+        valid = m.sum(dim=-1).clamp_min(1.0)
+        raw = (dg * m).sum(dim=-1) / valid
+        scl = (scaled_dg * m).sum(dim=-1) / valid
+        return raw, scl
+
     def folding_ddG(self, enc, mut_seq_tokens, wt_seq_tokens=None):
         wt = enc["seq"].unsqueeze(0) if wt_seq_tokens is None else wt_seq_tokens
         wt_dG = self.folding_dG(enc, wt.to(self.device))
