@@ -185,7 +185,52 @@ ESM3 原生有 6 个输出头(`OutputHeads`,esm3.py:151-185),都是**逐位点�
 
 ---
 
-## 9. 代码位置索引
+## 9. 训练细节(权威来源:MGnify paper `Sources/MGnify.pdf` Methods)
+
+> 来自 paper Methods 的 "Fine-Tuning with a Sigmoid-Corrected Stability Head" / "Loss Function with ΔΔG Regularization"。
+> ⚠ **官方仓库(absolute-stability-predictor)未发布训练代码**——只放了推理 + 权重;以下训练细节**以 paper 为准**。
+
+### 9.1 训练数据 + 微调
+- 训练集 = **MGnify Stability**(cDNA display proteolysis 测),960,216 序列(525k WT + 435k 点突变,无 indel),与 test 集 <30% 序列同一性。
+- LoRA(r=4,target `["layernorm_qkv.1","out_proj"]`)+ stability head + SigmoidScaling **可训**,ESM3 trunk **冻结**(见 §2/§6)。
+- **base = 3 次独立训练的 ensemble**(paper: "ensembles of three independent training runs";"single"=单次)。→ 我们两个 Task 用的就是 base 3-成员 ensemble。
+
+### 9.2 Loss —— 三项联合 MSE(paper 明确)
+$$L = 0.3\,(\Delta G_{pred,mut}-\Delta G_{true,mut})^2 + 0.3\,(\Delta G_{pred,WT}-\Delta G_{true,WT})^2 + 1.0\,(\Delta\Delta G_{pred}-\Delta\Delta G_{true})^2$$
+其中 $\Delta\Delta G_{pred}=\Delta G_{mut}-\Delta G_{WT}$。→ **同时监督 WT 绝对 dG(0.3)+ mutant 绝对 dG(0.3)+ ΔΔG(1.0,权重最大)**。
+> 对比:ProteinMPNN/StaB **只能训 ddG**(其 dG=未校准 Σlog P);ESM3ΔG 因 dG 校准,**能同时训绝对 dG + ΔΔG**。
+
+### 9.3 Sigmoid correction 层 + "按数据集开关"(最关键)
+head = 2 层 MLP(逐残基)→ **piecewise sigmoid correction**(= 代码 `SigmoidScaling`):
+```
+f(x) = 2/(1+e^(−α1·x)) − 1        for x < 0      # 负端 sigmoid 尾
+     = x                          for 0 ≤ x ≤ 4   # 中段线性(恒等)
+     = 3 + 2/(1+e^(−α2·(x−4)))    for x > 4       # 正端 sigmoid 尾   (α1,α2 可训练斜率)
+```
+**为什么**:cDNA display proteolysis 只在 **[-1,5] kcal/mol** 可靠(超出被截断/失真)→ sigmoid 把预测钳进该量程,可训斜率允许外推。
+
+**⚠ 开关规则(paper 原文,本节要点):**
+> "At inference time, we **activate the sigmoid correction layer for cDNA-based datasets** … For **non-cDNA datasets (e.g., calorimetry), we bypass this layer**, under the assumption that the model has already learned to map stabilities to the real kcal/mol scale during training."
+
+- **cDNA 数据集(MGnify、Megascale)→ sigmoid 开 = scaled**(钳进 [-1,5]);
+- **非 cDNA(量热/CD/宽量程如 S1724)→ sigmoid 关 = raw**(允许 >5 外推;raw 已在训练中学到 kcal/mol)。
+- **按数据集来源/量程开关,不是按 dG-vs-ddG 分**;整个 head 输出(WT-ΔG / mut-ΔG / ΔΔG)统一走这套。训练在 cDNA(MGnify)上做 → sigmoid 开 → 三项 loss 都建在 scaled 输出上。
+- **作者消融**:S1724(宽量程)关 sigmoid 改善大蛋白(1LVE 7.7、1YYX 9.5 kcal/mol)预测;Supplementary Fig 9 直接对比 sigmoid vs non-sigmoid ESM3ΔG。
+
+### 9.4 数据集归类 + 我们从 paper 明确的口径结论
+| 数据集 | cDNA? | 说明 | 我们任务口径 |
+|---|---|---|---|
+| **MGnify Stability** | ✅ | 本 paper,cDNA proteolysis | Task2 复现 → sigmoid 开 = **scaled** |
+| **Megascale**(Tsuboyama)| ✅ | 同 cDNA proteolysis | Task1 做**相对 ddG 排序**,raw/scaled 排序几乎无差 → 用 raw |
+| **SKEMPIv2** | ❌ | **binding 亲和力**(ITC/SPR),**非折叠、非 cDNA** | 我们 binding ddG 回归 → sigmoid 不适用,用 raw |
+
+**从 paper 明确的两条结论(留档):**
+1. **MGnify(cDNA)复现口径 = scaled**;我们 Task2 scaled Spearman **0.8718 ≈ paper 0.87** → **pretrained ESM3dG 部署正确**(排序侧)。
+2. **RMSE 1.58(scaled)/1.45(raw)都远于 paper 0.80 → 与 scaled/raw 无关**,归因于**结构来源:ESMFold2-Fast(我们) vs AlphaFold2(paper)**——paper 的 sigmoid 恰校准到 cDNA 的 [-1,5] 尺度,换折叠器 → 绝对尺度漂移,排序稳健。
+
+---
+
+## 10. 代码位置索引
 
 **esm 库(`/home/guoj0f/share/esm`,editable)**
 - `esm/models/esm3.py:62-148` `EncodeInputs`(多轨道 embedding 相加);`:151-185` `OutputHeads`;`:267-389` `ESM3.forward`;`:353-356` 坐标切 N,CA,C + 建 affine
