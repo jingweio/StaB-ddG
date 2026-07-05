@@ -44,5 +44,22 @@
 - 2026-07-05 16:xx:代码写好、两 variant 本地 smoke 通过;撤销非官方 mask-out(follow 官方);弃用 0.158 参照。提交 **3 job**:48071431(A concat)/ 48071432(B1 chainbreak mask-in 官方)/ 48071433(C ProteinMPNN 20×MC),均 RUNNING。
 - 2026-07-05 16:xx:用户要求"两个都试"→ 加 `--mask_pipe` 可选 flag(default off),提交 **第 4 job 48071517**(B2 chainbreak mask-out)。4 job 全部 submitted。status: RUNNING。
 
-## 5. Results (jobs 完成后填)
-- _待填:A/B/C 的 per-structure(THRESHOLD=10)+ overall Spearman/Pearson 对比表;concat vs chainbreak 差异;vs baseline 0.448 / vs ESM3dG-finetuned 0.158;结论(zero-shot 折叠→binding 迁移能力 + chainbreak 是否有用)。_
+## 5. Results (COMPLETED 2026-07-05;jobs 48071431/432/517/433,a100)
+
+**SKEMPI test(81 complexes / 1491 mutants)zero-shot binding ΔΔG,统一 `skempi_metrics.py` THRESHOLD=10:**
+
+| 模型(zero-shot)| per-structure (TH=10) | overall Spearman | overall Pearson |
+|---|---|---|---|
+| **A** ESM3dG concat | **−0.037** | −0.027 | 0.038 |
+| **B1** ESM3dG chainbreak(`\|`计入)| **−0.031** | −0.039 | 0.037 |
+| **B2** ESM3dG chainbreak(`\|`mask 掉)| **−0.031** | −0.039 | 0.037 |
+| **C** ProteinMPNN stage-1(20×MC)| **0.398** | 0.452 | 0.440 |
+| _参照_ ProteinMPNN 全 StaB(stage-2)| 0.448 | 0.531 | — |
+
+- csv 留证:`results/eval_skempi_esm3dg_base_ens_{concat,chainbreak,chainbreak_maskpipe}.csv` + `eval_skempi_pmpnn_stage1.csv`。0 OOM-skip(81/81)。
+
+**结论:**
+1. **原始 ESM3dG zero-shot 在 SKEMPI binding ddG 上 ≈ 0(略负)** —— MGnify 折叠表示经 StaB 分解**没有可用的 binding 信号**。3 种多链构造(concat / chainbreak `\|`计入 / mask 掉)**几乎无差**(−0.031~−0.037)→ 信号本就 ~0,构造选择不影响。
+2. **ProteinMPNN stage-1 zero-shot = 0.398**,近满 StaB(stage-2)0.448 → **StaB 的 binding 能力大部分来自 stage-1 Megascale 折叠 + StaB 分解,stage-2 SKEMPI 微调只 +~0.05**。
+3. **两个"折叠→binding via 分解"模型 zero-shot 天差地别**(ProteinMPNN 0.398 vs ESM3dG ~0)。呼应之前发现:ProteinMPNN 多链/binding 训练分布内、其 dG=Σlog P 迁移强;ESM3dG 单体 MGnify 训练、其回归 head 迁移弱。
+4. **对 exp4 的启示**:ESM3dG SKEMPI 微调是"从 ~0 起步造 binding 信号",要超越 0.448 是硬仗。
