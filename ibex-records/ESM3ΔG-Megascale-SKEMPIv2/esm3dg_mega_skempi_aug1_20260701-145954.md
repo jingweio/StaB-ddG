@@ -58,3 +58,6 @@
 | **ep15 (final)** | **0.1089** | 0.2542 |
 
 **结论:早停无用**,ep15 最优(per-structure 中途 ep10 还掉了一下,噪声)。与 task1 一致——gap 是真实方法限制,非过拟合。**且每个 epoch 处 overall 均低于 task1**,再次印证 Megascale stage 净负。csv:`results/eval_esm3dg_mega_skempi_aug1_ep{5,10}.csv`。
+
+### ⚠ 口径订正(2026-07-05):本文 per-structure = **≥2 突变**口径(非 StaB THRESHOLD=10)
+从 ckpt 的 `results/eval_esm3dg_mega_skempi_aug1.csv` **重算 THRESHOLD=10**(StaB baseline 0.448 口径):per-structure **0.1484**(≥2 口径旧值 0.1089),overall 0.2542。仍 « 0.448;且此 run 可能有问题(用户指出)。见 memory [[stabddg-per-interface-threshold10]]。
