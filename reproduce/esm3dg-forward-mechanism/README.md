@@ -228,6 +228,22 @@ f(x) = 2/(1+e^(−α1·x)) − 1        for x < 0      # 负端 sigmoid 尾
 1. **MGnify(cDNA)复现口径 = scaled**;我们 Task2 scaled Spearman **0.8718 ≈ paper 0.87** → **pretrained ESM3dG 部署正确**(排序侧)。
 2. **RMSE 1.58(scaled)/1.45(raw)都远于 paper 0.80 → 与 scaled/raw 无关**,归因于**结构来源:ESMFold2-Fast(我们) vs AlphaFold2(paper)**——paper 的 sigmoid 恰校准到 cDNA 的 [-1,5] 尺度,换折叠器 → 绝对尺度漂移,排序稳健。
 
+### 9.5 消融实验:sigmoid(scaled)开/关 —— cDNA vs 非-cDNA(作者原文做过)
+作者用一个**非-cDNA、宽量程**基准 **S1724** 直接对比了 sigmoid 开/关:
+
+- **S1724 数据集**(主文 + Methods):1,724 条**纯化蛋白**折叠稳定性(源自 ThermoMutDB),35 个 WT,ΔG 跨 **3–13 kcal/mol**、two-state 可逆去折叠。→ 典型**非-cDNA**(传统测量),量程**远超** cDNA 的 [-1,5]。
+- **消融做法**:原文 —— "Both models … use sigmoidal transformation … to constrain predictions to −1 to 5 kcal/mol; **we disabled this transformation for all four models for evaluating performance on this S1724 set**"(即对 S1724 **关 sigmoid = 用 raw**)。
+- **结论**:原文 —— "**Removing the sigmoid transformation** from the final prediction head **expanded the dynamic range** of predicted stabilities, **improving predictions** for proteins such as **1LVE(7.7 kcal/mol)、1YYX(9.5 kcal/mol)**"(**Supplementary Fig 9** 直接对比 sigmoid vs non-sigmoid ESM3ΔG,针对 >100 残基、超训练范围的蛋白)。
+- **但仍有上限**:即便关了 sigmoid,>10 kcal/mol 的极稳定蛋白(如人生长激素 **3HHR,ΔG=13.1**)仍不准 —— 这是**训练数据范围限制**(训练 max 5 kcal/mol / 80 aa),不是 sigmoid 本身的问题。
+
+**这组消融直接验证了 §9.3 的开关规则:**
+| 数据类型 | 量程 | sigmoid | 为什么 |
+|---|---|---|---|
+| **cDNA**(MGnify / Megascale)| 卡在 [-1,5] | **开 = scaled** | 钳进 cDNA 测量量程,最匹配数据(Fig 2:Spearman 0.87 / RMSE 0.80)|
+| **非-cDNA**(S1724 等,3–13 kcal/mol)| 宽 | **关 = raw** | sigmoid 在 x>4 软钳到 ≈5,>5 的真实稳定性会被截断 → 必须关掉才能外推到高稳定性 |
+
+> 一句话:**sigmoid 是为 cDNA 的 [-1,5] 量程量身定做的"钳位/校准层"**;数据一旦超出该量程(非-cDNA),就该关掉用 raw。作者用 **S1724 + Supplementary Fig 9** 实测证明了这一点——关 sigmoid 对宽量程蛋白(1LVE/1YYX)预测更好,但极稳定(>10 kcal/mol)受训练范围所限仍难。
+
 ---
 
 ## 10. 代码位置索引
