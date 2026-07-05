@@ -107,7 +107,7 @@ class ESM3dGScorer:
         vals = scaled_dg if scaled else dg
         mask = mask.to(vals.dtype)
         valid = mask.sum(dim=-1).clamp_min(1.0)
-        dG = (vals * mask).sum(dim=-1) / valid           # [B] masked mean
+        dG = (vals * mask).sum(dim=-1) / valid           # [B] masked mean (ESM3dG convention: excl cls/eos)
         return dG
 
     def folding_dG_both(self, enc, seq_tokens):

@@ -20,8 +20,9 @@
 - **ESM3dG 口径 = raw**(用户要求 (2);binding ddG 非 cDNA,binding_ddG 天然走 raw 的 folding_dG,scaled=False)。
 - **multi-chain 两构造(用户要求 (3))**:(a) 直接拼接;(b) chainbreak `\|`。chainbreak 经 workflow 对抗验证 = 官方 `from_protein_complex→encode` 路径,CORRECT。
 - **指标口径(统一)**:用 StaB `baselines/eval_utils.compute_metrics`(**THRESHOLD=10**:per-structure Spearman = ≥10 突变的复合物均值 + overall Spearman/Pearson)。三模型 + baseline 全用同一口径 → 可直接对比 **StaB baseline 0.448 / 0.531**。三模型都产 `#Pdb,ddG,ddG_pred` 的 per-mutation CSV,再统一 compute_metrics。
-- **chainbreak mask 细节**:folding_dG 的 masked-mean **把 `\|`(token 31)位置 mask 掉**(只平均真实残基;对无 pipe 的 A/Megascale/MGnify 是 no-op,安全)——采纳 verify agent 建议。
-- **对标**:ProteinMPNN 全 StaB(stage-2,SKEMPI-finetuned)per-structure **0.448** / overall 0.531;我们之前 ESM3dG-SKEMPI-finetuned 0.158;本实验都是 **zero-shot 下限**。
+- **chainbreak 聚合口径(2026-07-05 修订,follow 官方)**:**不特殊处理 `\|`**——用 **ESM3dG 原样的 masked-mean**(只排除 `<cls>`/`<eos>`,`mask[1:L-1]`,即 `\|` 按中间 token **包含**在 mean 里)。理由:masked-mean 是 ESM3dG 的聚合(非 ESM3),而 ESM3dG 官方多链是 variant(a)裸拼、从不喂 `\|`,故"`\|` 在 mean 里怎么办"无官方先例;为最小化非官方偏离,采用 ESM3dG 原样 mean。(曾考虑 verify agent 建议的"mask 掉 `\|`",因非官方、且用户要求 follow 官方 ESM3,已撤销;`\|` 仅 N-1 个、约 0.5% 稀释,影响小。若要严谨可 A/B。)
+- **对标**:ProteinMPNN 全 StaB(stage-2,SKEMPI-finetuned)per-structure **0.448** / overall 0.531(THRESHOLD=10 口径,与本实验一致 → 可直接比)。
+  - ⚠ **不以之前的 ESM3dG-SKEMPI-finetuned "0.158" 作参照**(用户 2026-07-05 指出那次实验存在问题):(1) 那次 `eval.py` 的 per-structure 用的是 **≥2 突变**口径,**不是 THRESHOLD=10**,与 0.448 / 本实验**不可比**;(2) 用户认为那次实验本身可能有问题(待复核)。故本实验只对 **0.448/0.531(同口径)** 对标,0.158 仅作历史备注、不作结论依据。
 
 **代码改动(local-first,不破坏现有实验):**
 - `skempi_data.py`:`struct_to_seq_coords(sd, chainbreak=False)` 加 chainbreak 分支;`stab_mut_to_esm_tokens` 改 **pipe-aware**;`build_skempi(..., chainbreak=False)` 透传。默认 chainbreak=False → **现有 SKEMPI/其它实验行为不变**。
