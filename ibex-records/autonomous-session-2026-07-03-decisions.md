@@ -62,9 +62,10 @@ Megascale/MGnify 的 mutant 都是 point mutation、与 scaffold 等长,按数�
 **Task1 — Megascale test 对比(job 47982066,43min):**
 | | 1a ESM3dG(zero-shot) | 1b ProteinMPNN-stage1(Megascale-finetuned) |
 |---|---|---|
-| per-domain Spearman | **0.7715** | 0.7690 |
-| overall Spearman | 0.6081 | 0.6983 |
+| per-domain Spearman | **0.7714**(scaled)| 0.7690 |
+| overall Spearman | 0.6077 | 0.6983 |
 - per-domain **打平**(ESM3dG zero-shot 竟≈ Megascale 专家)→ 部署 sane + 迁移强;overall ProteinMPNN 占优(per-domain强/overall弱,同 SKEMPI pattern)。
+- **2026-07-05 口径修订**:1a 首跑用 raw;经 paper 确认 Megascale=cDNA 应 scaled,job **48064110** scaled 重跑补齐(per-domain 0.7714≈raw 0.7715,结论不变)。Task1 md §5 主口径已改 scaled、raw 挪 §6。
 
 **总结论:两个独立验证都表明 pretrained ESM3dG 部署正确**(Task2 精准复现 paper Spearman;Task1a zero-shot 迁移与 Megascale 专家持平)。
 
