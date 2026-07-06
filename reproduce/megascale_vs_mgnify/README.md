@@ -9,7 +9,7 @@
 **“MGnify 是 Megascale 的升级版”基本成立；但“完全替代”过强，应修正为“主导性取代 + 保留 Megascale 作为深度补充与独立 benchmark”。**
 
 - ✅ **作为可泛化的 absolute-ΔG / ΔΔG 训练数据集**：MGnify 在序列与结构广度上比 Megascale 大 **~1000×**，并首次大规模测定**绝对折叠自由能 ΔG**。论文证据显示：单独用 MGnify 训练 > 单独用 Megascale 训练（ESM3 LoRA：**0.87 vs 0.73**），且 MGnify-trained 模型在 **Megascale 自己的点突变 benchmark** 上追平了用 Megascale 训练的 ThermoMPNN → **功能上可取代 Megascale**。
-- ⚠️ **但不是“丢弃 Megascale”**：(1) 论文发布的**最佳模型**用的是 **MGnify+Megascale 合并**数据（0.89 > MGnify-only 0.87）；(2) Megascale 的 **near-saturation 深度突变扫描**（479 个结构域、每个 ~99% 的单点突变全测）是 MGnify“广度优先”设计**无法复制的独特资源**；(3) 两者都 **≤80 aa**、同一 cDNA proteolysis 限制——MGnify 在“蛋白尺寸”维度**并未升级**。
+- ⚠️ **但不是“丢弃 Megascale”**：(1) 论文里确有一个 **MGnify+Megascale+MGnify-indels+ThermoMut 合并数据**训练的模型,但它是 **SaProtΔG LoRA 消融(Fig 2a class 5),不是发布的权重**;**两套发布的 ESM3ΔG——base 和 augmented——都只训在 MGnify,均未用 Megascale**。〔**订正 2026-07-06**:本条早前误写“论文最佳模型=MGnify+Megascale 合并 0.89>0.87”。经 paper+repo 双源核查(both high-confidence):(a) 发布的 base ESM3ΔG=MGnify-only,MGnify test **0.87**(SaProtΔG 0.88);Megascale-only ESM3 LoRA=0.73;(b) **`augmented`≠合并数据**,而是**同一 MGnify 数据的去偏版**(受限子集 456k + 人工加末端片段,消 cDNA-proteolysis 末端 bias),MGnify test 上**更弱**、但在真实纯化蛋白 S1724 上最强,故 repo 标 augmented 为 downstream“recommended”;(c) **0.89/0.90 是实验重复性**(trypsin vs chymotrypsin,Supp Fig 1),**非模型**;(d) 合并数据模型是 SaProt 消融、正文无数值、未发布。〕(2) Megascale 的 **near-saturation 深度突变扫描**(479 个结构域、每个 ~99% 的单点突变全测)是 MGnify“广度优先”设计**无法复制的独特资源**;(3) 两者都 **≤80 aa**、同一 cDNA proteolysis 限制——MGnify 在“蛋白尺寸”维度**并未升级**。
 - 📐 **核心权衡**：Megascale = **窄而深**（few domains, deep DMS）；MGnify = **广而浅**（massive domains, shallow per-domain）。二者在“深度”维度**互补**，最佳实践是**并集**。
 
 ![breadth vs depth](figures/fig1_breadth_vs_depth.png)

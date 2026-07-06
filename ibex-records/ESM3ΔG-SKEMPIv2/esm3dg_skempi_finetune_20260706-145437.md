@@ -28,7 +28,7 @@
 - **【决策】{1e-6, 5e-6, 1e-5, 5e-5, 1e-4}(5 个)**。
 
 ### 5b. epochs / 存 ckpt / 选模型
-- **【决策】max-epochs = 50**(不搞自动 early-stop)。理由:200ep(拉齐 StaB)≈ **92h/job**(旧 15ep 实测 6h52m≈27.5min/ep)完全不可行;50ep ≈ **~23h/job**(卡 24h walltime)。precise 每-epoch 耗时用 a100 2ep smoke(job 48111099)实测确认。
+- **【决策】max-epochs = 50**(不搞自动 early-stop)。理由:200ep(拉齐 StaB)≈ 92h/job 完全不可行。**a100 2ep 计时 smoke(job 48111099)实测:epoch1=1670s, epoch2=1673s ≈ 27.9min/ep**(120 复合物,oom_skipped=6)→ **50ep ≈ 23.4h + build(~10min) → 设 walltime 30h**(buffer;会路由到 gpu72)。
 - **【决策】每 10 epochs 存一个 ckpt**(`--save_freq 10` → ep10/20/30/40 + final ep50)。
 - **【决策】事后逐 ckpt 在 test 上 eval,随时看轨迹**。
   - ⚠ **口径提醒**:"逐 ckpt 挑 test 最好" = 在 test 上选模型(轻微 test-peeking)。StaB 0.448 是固定训练后的数(无 val 选择)→ **报结果时同时给 (i) final-ep50(与 StaB 严格同口径)和 (ii) best-of-{ep10..50}(test-selected 上界)**。
@@ -67,5 +67,15 @@
 - env `esm3dg`(py3.12+torch2.6+cu124,esm 3.3.0 editable from `share/esm`);a100-80GB;per-branch ibex `/ibex/user/guoj0f/StaB-ddG/MGnify-replace/`;`HF_HOME=/ibex/user/guoj0f/share/hf_cache`。
 - base 权重 `data/esm3dg_weights/ESM3dG_weights_{1,2,3}_lora.ckpt`。
 
+## 11. 权重溯源(2026-07-06 paper+repo 双源核查,both high-confidence)& base-vs-augmented 待决
+- **发布的 ESM3ΔG 只有两套,都只训在 MGnify,均未用 Megascale**:
+  - **base(`weights_{1,2,3}`)= MGnify-only**(960,216 seqs,K50dG DMSv4/v5/v7,WT+点突变,无 indel;ΔG+ΔΔG 联合 loss 0.3/0.3/1.0,ΔΔG 来自 MGnify WT/mut 对而非 Megascale)。MGnify test **0.87**(SaProtΔG 0.88)。
+  - **augmented(`weights_augmented_{1,2,3}`)= 同一 MGnify 数据的去偏版**:受限子集(456k,剔除末端>2 无结构残基的域)+ 人工加末端片段(50% 概率、每端 1–15 随机残基)消 cDNA-proteolysis 末端 bias。MGnify test 上**更弱**,但真实纯化蛋白 S1724 上**最强** → **repo README 标 augmented 为 downstream“recommended”**,论文 Fig 3–6 全用 augmented。
+- **既往误解订正**:早前以为“augmented=MGnify+Megascale 合并、0.89”——**错**。0.89/0.90 是实验重复性(trypsin vs chymotrypsin,Supp Fig 1),非模型;真正的合并数据(MGnify+Megascale+indels+ThermoMut)模型是 **SaProtΔG 消融(Fig 2a),未发布、非 ESM3ΔG**。
+- **Megascale split**:ESM3ΔG **不训 Megascale**,仅用其做**评测**(复用 ThermoMPNN 的 28-WT / 28,172 点突变 test set,Dieckhaus 2024)。repo **不含任何 Megascale split 文件**,无 StaB `mega_splits.pkl` 的对应物。→ 与 StaB(训在 Rocklin `mega_splits.pkl`:train239/val31/test28)**不是同一 split、也不是同一用途**。
+- **【开放决策 — 影响 exp4 起点】base vs augmented 作为微调起点**:
+  - 现 sweep 用 **base weights_1**(沿用 2026-07-03 用户决策“原始 ESM3dG=base 3-ens”)。
+  - 但 augmented 是论文/repo **明确推荐的泛化版**(真实蛋白最强);SKEMPI binding 属“真实世界泛化”而非 cDNA in-distribution → **augmented 可能是更好的微调起点**。待用户决定 base 还是 augmented(与 Megascale 无关,是去偏/泛化之别)。
+
 ## 10. Change log (LIVE)
-- 2026-07-06:老实验清理(local+Ibex);probe 实测 max-batch(job 48106749);`finetune.py` 加梯度累积(数值验证 PASS)+ per-epoch 计时;本地端到端 smoke PASS;a100 2ep 计时 smoke 提交(job 48111099)。决策锁定 §2–§5、§7;§6 两个开放决策待拍板。
+- 2026-07-06:老实验清理(local+Ibex);probe 实测 max-batch(job 48106749);`finetune.py` 加梯度累积(数值验证 PASS)+ per-epoch 计时;本地端到端 smoke PASS;a100 2ep 计时 smoke **完成**(job 48111099,**27.9min/ep**);构造决策=chainbreak+mask_pipe(5 job,§6);**paper+repo 双源核查权重溯源(§11):base/augmented 均 MGnify-only,均未训 Megascale;订正 megascale_vs_mgnify/README 的“augmented=合并 0.89”错误**。待决:base vs augmented 起点。
