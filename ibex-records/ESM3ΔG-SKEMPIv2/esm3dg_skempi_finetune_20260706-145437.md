@@ -83,4 +83,5 @@
   - 但 augmented 是论文/repo **明确推荐的泛化版**(真实蛋白最强);SKEMPI binding 属“真实世界泛化”而非 cDNA in-distribution → **augmented 可能是更好的微调起点**。待用户决定 base 还是 augmented(与 Megascale 无关,是去偏/泛化之别)。
 
 ## 10. Change log (LIVE)
+- 2026-07-06(晚):**10-job sweep 提交**(base+aug × 5lr)。首提 walltime 30h → 仅进 `gpu,gpu72`、est start ~33h(07-07 23:50)。**改 walltime `23:59:00` 重提交** → 进 `gpu,gpu24,gpu72`(+gpu24 ~32 节点,实测 dry-run 确认路由),大幅提前。当前 job:**base 48114396 / aug 48114397**(旧 48113240/241 已 cancel)。监控轮询挂着(第一个 ckpt 或全结束时通知)。
 - 2026-07-06:老实验清理(local+Ibex);probe 实测 max-batch(job 48106749);`finetune.py` 加梯度累积(数值验证 PASS)+ per-epoch 计时;本地端到端 smoke PASS;a100 2ep 计时 smoke **完成**(job 48111099,**27.9min/ep**);构造决策=chainbreak+mask_pipe(5 job,§6);**paper+repo 双源核查权重溯源(§11):base/augmented 均 MGnify-only,均未训 Megascale;订正 megascale_vs_mgnify/README 的“augmented=合并 0.89”错误**。待决:base vs augmented 起点。
