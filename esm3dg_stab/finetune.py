@@ -63,6 +63,8 @@ def main():
     ap.add_argument("--resume", default="", help="prior fine-tuned adapters (stage chaining)")
     ap.add_argument("--data_dir", default=os.path.join(HERE, "..", "data"))
     ap.add_argument("--split", default="train")
+    ap.add_argument("--chainbreak", action="store_true", help="skempi: join chains with '|'+NaN chainbreak")
+    ap.add_argument("--mask_pipe", action="store_true", help="exclude '|' from the stability-head masked-mean")
     ap.add_argument("--lr", type=float, default=6e-5)        # esm-replace best for ESM3
     ap.add_argument("--optimizer", choices=["adam", "adamw"], default="adamw")
     ap.add_argument("--weight_decay", type=float, default=0.05)
@@ -84,7 +86,7 @@ def main():
     print(f"[{args.run_name}] stage={args.stage} lr={args.lr} {args.optimizer} wd={args.weight_decay} "
           f"epochs={args.epochs} batch_tokens={args.batch_tokens} dev={dev}")
 
-    scorer = ESM3dGScorer(args.lora_ckpt, device=dev, trainable=True)
+    scorer = ESM3dGScorer(args.lora_ckpt, device=dev, trainable=True, mask_pipe=args.mask_pipe)
     if args.resume:
         load_adapters(scorer, args.resume)
     n_train = sum(p.numel() for p in scorer.trainable_parameters())
@@ -99,7 +101,7 @@ def main():
             split_path=os.path.join(D, "SKEMPI", f"{args.split}_pdb.pkl"),
             pdb_dir=os.path.join(D, "SKEMPI2_PDBs"),
             pdb_dict_cache_path=os.path.join(HERE, "..", "cache", f"skempi_esm3_{args.split}_pdb_dict.pkl"),
-            limit=args.limit)
+            limit=args.limit, chainbreak=args.chainbreak)
         predict = chunked_binding_ddG
     else:
         from megascale_data import build_megascale

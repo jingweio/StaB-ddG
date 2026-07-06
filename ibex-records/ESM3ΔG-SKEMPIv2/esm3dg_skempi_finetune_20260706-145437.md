@@ -49,13 +49,11 @@
 - optimizer=adamw,weight_decay=0.05,seed=0。LoRA dropout 0.15(训练时开;StaB ProteinMPNN dropout=0)。
 - **单成员 weights_1** 跑 sweep;最优配置再用 weights_1/2/3 做 3-member ensemble。
 
-## 6. 【开放决策 — 待用户拍板,起 sweep 前】
-- **① 多链构造扫哪些**(exp3 已证 b1 `|`mask ≈ b2 `|`保留,完全相同 −0.031 → b1/b2 分开扫冗余):
-  - 精简(推荐):**concat + chainbreak(保留`\|`,官方 default)= 2 构造 ×5 lr = 10 job**;
-  - 最小:仅 concat = 5 job;
-  - 全量(原 spec):concat + b1 + b2 = 15 job。
-- **② 是否 staging**:推荐 Phase-1 = 5 lr × concat(5 job)先挑最佳 lr + 看 test 轨迹 → Phase-2 = 最佳 lr 上跑 chainbreak。
-- (chainbreak 用于**训练**需给 `finetune.py` 加 `--chainbreak/--mask_pipe`,~10 行照搬 eval_skempi_ens;concat 现成可跑。)
+## 6. 多链构造 & sweep 规模(已定 2026-07-06)
+- **【决策】构造 = "拼接含 chainbreak(`\|`+NaN 分隔) + output masked-mean 时 mask 掉 `\|`"** = `--chainbreak --mask_pipe`(= exp3 的 B2)。**单一构造**(不扫 concat、不扫 b1)。
+  - 依据:exp3 已证 b1(`\|`计入)≈ b2(`\|`mask)完全相同;用户选 mask-out 变体(只平均真实残基)。
+- **【决策】sweep = 5 job = 5 lr × 该单一构造**,无 staging。每 job:`--epochs 50 --save_freq 10 --batch_tokens 10000 --max_batch 4 --chainbreak --mask_pipe`,单成员 weights_1。
+- 代码:`finetune.py` 已加 `--chainbreak/--mask_pipe`(2026-07-06),本地 smoke 验证中。
 
 ## 7. 指标口径(统一)
 - **per-structure Spearman THRESHOLD=10**(≥10 突变复合物均值,StaB baseline 0.448 口径)+ overall Spearman/Pearson(无阈值),用 `esm3dg_stab/skempi_metrics.py`。对标 **ProteinMPNN 0.448 / 0.531**。见 memory [[stabddg-per-interface-threshold10]]。
