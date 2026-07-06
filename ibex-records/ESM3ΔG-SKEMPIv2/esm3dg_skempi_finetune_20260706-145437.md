@@ -52,8 +52,13 @@
 ## 6. 多链构造 & sweep 规模(已定 2026-07-06)
 - **【决策】构造 = "拼接含 chainbreak(`\|`+NaN 分隔) + output masked-mean 时 mask 掉 `\|`"** = `--chainbreak --mask_pipe`(= exp3 的 B2)。**单一构造**(不扫 concat、不扫 b1)。
   - 依据:exp3 已证 b1(`\|`计入)≈ b2(`\|`mask)完全相同;用户选 mask-out 变体(只平均真实残基)。
-- **【决策】sweep = 5 job = 5 lr × 该单一构造**,无 staging。每 job:`--epochs 50 --save_freq 10 --batch_tokens 10000 --max_batch 4 --chainbreak --mask_pipe`,单成员 weights_1。
-- 代码:`finetune.py` 已加 `--chainbreak/--mask_pipe`(2026-07-06),本地 smoke 验证中。
+- **【决策】sweep = 10 job = {base, augmented} × 5 lr**(用户 2026-07-06 决定两套权重都扫;见 §11 base/aug)。无 staging。每 job:`--epochs 50 --save_freq 10 --batch_tokens 10000 --max_batch 4 --chainbreak --mask_pipe`,单成员(weights_1 / weights_augmented_1)。
+- 代码:`finetune.py` 已加 `--chainbreak/--mask_pipe`(2026-07-06),本地 smoke PASS。
+- **存储命名规范(防混淆,用户要求)** —— 所有结果制品都自描述带 `{base|aug}_lr{值}`:
+  - **两个独立 sbatch**:`sh/ft_cbmask_{base,aug}_sweep_20260706-145437.sh`(各 `--array=0-4` 映射 5 lr)。
+  - **训练日志**:`ft_cbmask_{base,aug}_lr%a_20260706-145437.{out,err}`(%a=lr 索引:0→1e-6,1→5e-6,2→1e-5,3→5e-5,4→1e-4;每 job 首行 echo `WEIGHTSET=... lr=...`)。
+  - **adapter ckpt**:`cache/esm3dg_skempi_cbmask_{base,aug}_lr{值}[_ep{10,20,30,40}].pt`;final(ep50)= `..._lr{值}.pt`。
+  - **eval 结果 CSV(事后)**:`results/eval_skempi_cbmask_{base,aug}_lr{值}_ep{N}.csv`。
 
 ## 7. 指标口径(统一)
 - **per-structure Spearman THRESHOLD=10**(≥10 突变复合物均值,StaB baseline 0.448 口径)+ overall Spearman/Pearson(无阈值),用 `esm3dg_stab/skempi_metrics.py`。对标 **ProteinMPNN 0.448 / 0.531**。见 memory [[stabddg-per-interface-threshold10]]。
