@@ -67,8 +67,10 @@ def main():
     ap.add_argument("--optimizer", choices=["adam", "adamw"], default="adamw")
     ap.add_argument("--weight_decay", type=float, default=0.05)
     ap.add_argument("--epochs", type=int, default=15)
-    ap.add_argument("--batch_tokens", type=int, default=8000)
-    ap.add_argument("--max_batch", type=int, default=8, help="hard cap on #seqs/batch (ESM3 memory)")
+    ap.add_argument("--batch_tokens", type=int, default=10000,
+                    help="StaB token budget: optimizer-step WINDOW = batch_tokens//L mutants (grad-accumulated)")
+    ap.add_argument("--max_batch", type=int, default=4,
+                    help="physical micro-batch cap /forward (ESM3 memory); grads accumulated up to the window")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--single_batch", action="store_true",
                     help="sample one batch of mutants per domain/epoch (needed for Megascale: ~1460 muts/domain)")
@@ -114,6 +116,7 @@ def main():
     loss_fn = torch.nn.MSELoss()
 
     for ep in range(args.epochs):
+        t_ep = time.time()
         scorer.model.train()
         order = np.random.permutation(len(items))
         losses, sps, oom = [], [], 0
@@ -122,41 +125,53 @@ def main():
             label = it["ddG"].to(dev)
             L = (it["complex"]["seq"].shape[0] if args.stage == "skempi" else it["enc"]["seq"].shape[0])
             n = label.shape[0]
-            perm = torch.randperm(n)                       # shuffle mutants within domain each epoch
+            perm = torch.randperm(n)                       # shuffle mutants within complex each epoch
             label = label[perm.to(dev)]
-            M0 = _batch_M(L, args.batch_tokens, args.max_batch)
-            success, ps = False, []
-            # fall back M0 -> 2 -> 1 on OOM before giving up (recovers large complexes;
-            # a too-big complex usually OOMs on the FIRST chunk, so no steps are applied yet)
-            for Mtry in sorted({M0, 2, 1}, reverse=True):
-                ps = []
-                try:
-                    for s in range(0, n, Mtry):
-                        e = min(n, s + Mtry)
-                        pi = perm[s:e]
-                        optimizer.zero_grad()
-                        if args.stage == "skempi":
-                            pred = scorer.binding_ddG(it["complex"], it["binder1"], it["binder2"],
-                                                      it["complex_mut"][pi], it["binder1_mut"][pi], it["binder2_mut"][pi])
-                        else:
-                            pred = scorer.folding_ddG(it["enc"], it["mut"][pi])
-                        loss = loss_fn(pred, label[s:e])
-                        loss.backward(); optimizer.step()
-                        losses.append(loss.item()); ps.append(pred.detach().cpu())
-                        if args.single_batch:              # one batch/domain/epoch (Megascale: ~1460 muts/domain)
-                            break
-                    success = True; break
-                except torch.cuda.OutOfMemoryError:
-                    optimizer.zero_grad(set_to_none=True); torch.cuda.empty_cache(); continue
-            if not success:
-                oom += 1; continue
+            # StaB alignment: one optimizer step per WINDOW of Mwin = batch_tokens//L mutants
+            # (StaB does exactly this; its tiny model fits Mwin in one forward). ESM3-1.4B can't,
+            # so we GRAD-ACCUMULATE physical micro-batches (<= max_batch, OOM-fallback ->2->1) up
+            # to the window, then step ONCE. => same #mutants averaged per gradient & same #steps
+            # per complex as StaB. Loss scaled by (chunk/window) so accumulated grad == mean over window.
+            Mwin = max(1, args.batch_tokens // max(1, L))
+            n_use = min(n, Mwin) if args.single_batch else n   # single_batch: one window/complex/epoch (Megascale)
+            ps, failed = [], False
+            for ws in range(0, n_use, Mwin):
+                we = min(n_use, ws + Mwin); win = we - ws
+                ps_mark = len(ps); win_loss, ok = 0.0, False
+                for mbtry in sorted({args.max_batch, 2, 1}, reverse=True):
+                    optimizer.zero_grad(set_to_none=True)
+                    del ps[ps_mark:]                        # drop partial preds from a failed OOM attempt
+                    win_loss = 0.0
+                    try:
+                        for s in range(ws, we, mbtry):
+                            e = min(we, s + mbtry)
+                            pi = perm[s:e]
+                            if args.stage == "skempi":
+                                pred = scorer.binding_ddG(it["complex"], it["binder1"], it["binder2"],
+                                                          it["complex_mut"][pi], it["binder1_mut"][pi], it["binder2_mut"][pi])
+                            else:
+                                pred = scorer.folding_ddG(it["enc"], it["mut"][pi])
+                            loss = loss_fn(pred, label[s:e]) * ((e - s) / win)   # accumulate -> mean over window
+                            loss.backward()
+                            win_loss += loss.item()
+                            ps.append(pred.detach().cpu())
+                        ok = True; break
+                    except torch.cuda.OutOfMemoryError:
+                        optimizer.zero_grad(set_to_none=True); torch.cuda.empty_cache(); continue
+                if not ok:                                  # even micro-batch=1 OOMs -> drop this complex
+                    failed = True; break
+                optimizer.step()
+                losses.append(win_loss)
+            if failed:
+                oom += 1; optimizer.zero_grad(set_to_none=True); del ps[:]; continue
             if ps:
                 ps = torch.cat(ps)
                 if ps.shape[0] >= 3:
                     sp, _ = spearmanr(ps.numpy(), label[:ps.shape[0]].cpu().numpy())
                     if np.isfinite(sp): sps.append(sp)
         print(f"  epoch {ep+1}/{args.epochs}  loss={np.mean(losses):.4f}  "
-              f"train_spearman={np.mean(sps):.3f}  oom_skipped_complexes={oom}", flush=True)
+              f"train_spearman={np.mean(sps):.3f}  oom_skipped_complexes={oom}  "
+              f"time={time.time()-t_ep:.0f}s", flush=True)
         if args.save_freq and (ep + 1) % args.save_freq == 0 and (ep + 1) < args.epochs:
             save_adapters(scorer, args.out.replace(".pt", f"_ep{ep+1}.pt"))
 
