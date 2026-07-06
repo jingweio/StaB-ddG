@@ -22,9 +22,10 @@ def main():
     ap.add_argument("--ckpt", required=True)
     ap.add_argument("--data_dir", default=os.path.join(HERE, "..", "data"))
     ap.add_argument("--split", default="train")
-    ap.add_argument("--batches", default="2,4,6,8,10,12,16")
-    ap.add_argument("--n_probe", type=int, default=3, help="probe the N complexes at the chosen end")
-    ap.add_argument("--order", choices=["largest", "smallest"], default="largest")
+    ap.add_argument("--batches", default="1,2,3,4,6,8,12,16")
+    ap.add_argument("--n_probe", type=int, default=6, help="probe N complexes")
+    ap.add_argument("--order", choices=["largest", "smallest", "spread"], default="spread",
+                    help="spread = N complexes evenly across the L(complex) spectrum (min..max)")
     ap.add_argument("--chainbreak", action="store_true")
     ap.add_argument("--stab_tokens", type=int, default=10000, help="StaB batch_size token budget")
     args = ap.parse_args()
@@ -40,7 +41,15 @@ def main():
         pdb_dict_cache_path=os.path.join(HERE, "..", "cache", f"skempi_esm3_{args.split}_pdb_dict.pkl"),
         chainbreak=args.chainbreak)
     scorer.set_trainable(True)   # re-freeze VQ-VAE etc. after encode; keep LoRA+head trainable
-    items = sorted(items, key=lambda it: it["complex"]["seq"].shape[0], reverse=(args.order == "largest"))[:args.n_probe]
+    items_sorted = sorted(items, key=lambda it: it["complex"]["seq"].shape[0])   # ascending L
+    if args.order == "spread":
+        n = min(args.n_probe, len(items_sorted))
+        idxs = [round(i * (len(items_sorted) - 1) / (n - 1)) for i in range(n)] if n > 1 else [len(items_sorted) - 1]
+        items = [items_sorted[i] for i in idxs]
+    elif args.order == "largest":
+        items = items_sorted[::-1][:args.n_probe]
+    else:  # smallest
+        items = items_sorted[:args.n_probe]
     loss_fn = torch.nn.MSELoss()
     Bs = [int(b) for b in args.batches.split(",")]
     max_ok = {}
