@@ -7,7 +7,7 @@
 #SBATCH --output=/ibex/user/guoj0f/StaB-ddG/MGnify-replace/ibex-records/ESM3ΔG-SKEMPIv2/probe_batch_a100_20260706-132142.out
 #SBATCH --error=/ibex/user/guoj0f/StaB-ddG/MGnify-replace/ibex-records/ESM3ΔG-SKEMPIv2/probe_batch_a100_20260706-132142.err
 set -euo pipefail
-source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/miniconda3/etc/profile.d/conda.sh
+source /ibex/user/guoj0f/anaconda3/etc/profile.d/conda.sh
 conda activate esm3dg
 export HF_HOME=/ibex/user/guoj0f/share/hf_cache
 export HF_HUB_OFFLINE=1
