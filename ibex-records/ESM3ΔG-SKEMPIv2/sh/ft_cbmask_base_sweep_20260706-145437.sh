@@ -3,7 +3,7 @@
 #SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=110G
-#SBATCH --time=30:00:00
+#SBATCH --time=23:59:00
 #SBATCH --array=0-4
 #SBATCH --output=/ibex/user/guoj0f/StaB-ddG/MGnify-replace/ibex-records/ESM3ΔG-SKEMPIv2/ft_cbmask_base_lr%a_20260706-145437.out
 #SBATCH --error=/ibex/user/guoj0f/StaB-ddG/MGnify-replace/ibex-records/ESM3ΔG-SKEMPIv2/ft_cbmask_base_lr%a_20260706-145437.err
