@@ -18,8 +18,9 @@
 ## 4. 数据 & split
 - **【决策】不切 val-split**(见 §5c 证据:StaB 没放 val、SKEMPI 也没用 val);**全 train-split 训练**。
 - SKEMPI:train 120 复合物 / 3050 突变;test 81 / 1491。split 用 StaB 的 `data/SKEMPI/{train,test}_pdb.pkl`(同源 clusters 划分,与 baseline 同)。
-- **【决策】训练时丢弃 OOM 复合物(不开 checkpointing)**:3 个最大 train 复合物 **3VR6(L=3399,16mut)、1KBH(L=2122,85mut)、4GXU(L=1930,3mut)= 104 突变**,做训练 step 时连 micro-batch=1 都 OOM(a100-80GB)→ `oom_skipped_complexes` 完全丢弃。
-  - **代价**:训练样本比 StaB 少 104 个(StaB 用极小 ProteinMPNN、L=3399 也塞得下、不丢);含全 train 集最富数据的 1KBH(85mut)。已知、接受。
+- **【决策】训练时丢弃 OOM 复合物(不开 checkpointing)**:做训练 step 时连 micro-batch=1 都 OOM(a100-80GB)的复合物 → `oom_skipped_complexes` 完全丢弃。**实测(训练 run + 显存模型一致)= 6 个复合物 / 157 突变(占 3050 的 5.1%)**,阈值 L≳~1475 tok;点名的最大 3 个:3VR6(L=3406,16mut)、1KBH(L=2123,85mut)、4GXU(L=1937,3mut),另 3 个 L∈[~1475,1930)。〔订正:早前只按 probe 点名的最大 3 个写成“104 突变”,实际 `oom_skipped=6`→157。〕
+  - **代价**:训练样本比 StaB 少 157 个(StaB 用极小 ProteinMPNN、L=3406 也塞得下、不丢);含全 train 集最富数据的 1KBH(85mut)。已知、接受。
+  - **v100-32GB 对比(2026-07-07 估算,a100 显存曲线校准)**:若换 v100,B=1 OOM 阈值降到 L≳~760 → **丢 23/120 复合物 = 19.2% / 424 突变 = 13.9%**(~4× a100 的损失)→ 佐证 v100 不适合本 memory-bound 训练。
 - **test 不丢任何样本**:eval=`no_grad`(显存低 ~5-10×,exp3 实测 81/81 全过);且那 3 个巨型复合物都在 **train**,test 最大仅 L≈1029。→ **test = 完整 81/1491,与 StaB 0.448 同口径可直接比**。
 - **不加 Megascale stage**:exp4 = 纯 SKEMPI 微调(from 原始 pretrained ESM3dG)。task2 已证 Megascale folding stage-1 对 binding **净负**(THRESHOLD=10 下 0.148 < task1 的 0.193)。
 
