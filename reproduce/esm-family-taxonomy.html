@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESM 模型家族梳理与纠正</title>
+<style>
+  :root{--ok:#1a7f37;--warn:#b45309;--err:#b91c1c;--ink:#1f2328;--mut:#57606a;--line:#d0d7de;--bg:#f6f8fa;--accent:#0969da;}
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,"Segoe UI",Roboto,"Helvetica Neue","PingFang SC","Microsoft YaHei",sans-serif;
+       color:var(--ink);line-height:1.65;margin:0;padding:0 20px 80px;max-width:960px;margin:0 auto;}
+  h1{font-size:1.8rem;margin:32px 0 6px}
+  .sub{color:var(--mut);margin:0 0 24px;font-size:.95rem}
+  h2{font-size:1.3rem;margin:36px 0 8px;padding-bottom:6px;border-bottom:2px solid var(--line)}
+  h3{font-size:1.08rem;margin:20px 0 6px}
+  code{background:var(--bg);padding:1px 5px;border-radius:4px;font-size:.88em;
+       font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  pre{background:#0d1117;color:#e6edf3;padding:14px 16px;border-radius:8px;overflow-x:auto;font-size:.82rem;line-height:1.5}
+  pre code{background:none;color:inherit;padding:0}
+  .badge{display:inline-block;font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:20px;color:#fff;vertical-align:middle}
+  .b-ok{background:var(--ok)} .b-warn{background:var(--warn)} .b-err{background:var(--err)} .b-info{background:var(--accent)}
+  .card{border:1px solid var(--line);border-radius:10px;padding:4px 18px 14px;margin:16px 0;background:#fff}
+  .you{border-left:4px solid var(--mut);background:var(--bg);padding:8px 12px;border-radius:0 6px 6px 0;margin:10px 0;font-size:.92rem}
+  .you b{color:var(--mut)}
+  .fix{margin:8px 0}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:.86rem}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:var(--bg)}
+  .k{color:var(--mut);font-size:.82rem}
+  ul{margin:6px 0 6px 0;padding-left:22px} li{margin:3px 0}
+  .note{background:#fff8e6;border:1px solid #f0d999;border-radius:8px;padding:10px 14px;margin:14px 0;font-size:.9rem}
+  .src{color:var(--mut);font-size:.8rem;font-style:italic}
+  em.hl{font-style:normal;background:#fff3cd;padding:0 3px;border-radius:3px}
+</style>
+</head>
+<body>
+
+<h1>ESM 模型家族梳理与纠正</h1>
+<p class="sub">对「按功能分四支」理解的逐条 review（✓ 正确 / ⚠️ 需修正 / ✗ 错误），附代码与论文证据。制作于 2026-07-07，StaB-ddG · esm-replace 分支。</p>
+
+<div class="note">
+<b>一句话总纲：</b>你的四分支<b>框架整体是对的、时间线也基本准</b>。主要需要修正的是<b>架构措辞</b>——ESM1/2/C/ESM3 都<b>不是 encoder-decoder</b>，而是<em class="hl">「深的双向 Transformer 主干（trunk）+ 极薄的输出头（thin head）」</em>；以及 ESM2/ESM-C 的「生成」是<b>迭代式 masked 预测</b>而非自回归。ESMFold2 那些结论（基于 ESM-C、无 MSA、折复合物、部分超越 AF3）<b>核实基本属实</b>，但「超越 AF3」有明确的适用范围。
+</div>
+
+<!-- ============ 分支 1 ============ -->
+<h2>① 纯序列表征建模 <span class="k">ESM1 → ESM2 → ESM-C</span></h2>
+<div class="card">
+<div class="you"><b>你的理解：</b>ESM1(2021)→ESM2(2023)→ESM-C(2024)，用海量数据做 masked language modeling；<b>encoder-decoder</b> 方式建模；吃 sequence 拿 encoder 吐表征 / 也可循环生成 sequence（step by step）。</div>
+
+<p class="fix"><span class="badge b-ok">✓</span> 时间线与谱系正确。ESM-1b/1v (2021, Rives et al.)、ESM2 (2022 bioRxiv → 2023 Science, Lin et al.)、<b>ESM-C = ESM Cambrian</b> (2024, EvolutionaryScale，出 300M/600M/6B 三档，6B 维度 2560)。用<b>掩码语言建模（MLM）</b>在海量（含宏基因组）序列上训练 — 正确。</p>
+
+<p class="fix"><span class="badge b-err">✗ 需修正</span> <b>不是 encoder-decoder，是 encoder-only（BERT 式）。</b> 这三代都是<b>单个深层双向 Transformer 主干</b>，没有独立的 decoder 栈。训练时在主干输出上接一个<b>极薄的 LM head</b>（就是你想象的“decoder”，其实只是个 2 层 MLP，见文末 Q2）把表征投影成词表 logits。所谓「拿 encoder 吐表征」= 取主干的 hidden states；不存在 seq2seq 意义上的 encoder→decoder。</p>
+
+<p class="fix"><span class="badge b-warn">⚠️ 需修正</span> <b>「循环生成 sequence step by step」措辞不准。</b> ESM2/ESM-C 是<b>双向掩码模型</b>，<b>不是自回归（左到右）生成器</b>。它能生成，但方式是<b>迭代式 masked 预测</b>（mask 一些位点→预测→填回→再 mask，类似 masked-diffusion / Gibbs 采样），不是 GPT 那种一个 token 接一个 token 的自回归。</p>
+<p class="src">证据：<code>share/esm/esm/models/esmc.py:76</code> <code>self.sequence_head = RegressionHead(d_model, 64)</code>；<code>:184</code> <code>sequence_logits = self.sequence_head(x)</code> — 主干出 x，薄头出 logits。</p>
+</div>
+
+<!-- ============ 分支 2 ============ -->
+<h2>② 多模态表征建模 <span class="k">ESM3</span></h2>
+<div class="card">
+<div class="you"><b>你的理解：</b>ESM3 联合建模 seq-structure-function，用 masked-encoder-decoder 学习；吃 3 个模态特征、吐 3 个模态特征，以及 3 个模态在不同 site 上的生成任务。</div>
+
+<p class="fix"><span class="badge b-ok">✓</span> 核心正确：ESM3 (2024, Hayes et al.) 是<b>多轨（multi-track）联合建模</b>，用<b>全模态互相掩码预测</b>训练，能「给定任意子集→补全其余」，因此天然支持各模态互相生成（给结构生序列、给序列生结构…）。</p>
+
+<p class="fix"><span class="badge b-warn">⚠️ 需修正</span> <b>「encoder-decoder」同样不准，且不止 3 个模态。</b> ESM3 = <b>单个双向 Transformer 主干（带 geometric attention）+ 每条轨道一个薄输出头</b>。代码里其实有 <b>6 个 track head</b>（都是 <code>RegressionHead</code>）：</p>
+<pre><code>share/esm/esm/models/esm3.py:154-159  (class OutputHeads)
+  sequence_head  = RegressionHead(d_model, 64)      # 序列词表
+  structure_head = RegressionHead(d_model, 4096)    # 结构 token（VQ 码本）
+  ss8_head       = RegressionHead(d_model, 8+3)     # 二级结构
+  sasa_head      = RegressionHead(d_model, 16+3)    # 溶剂可及面积
+  function_head  = RegressionHead(d_model, 260*8)   # 功能注释
+  residue_head   = RegressionHead(d_model, 1478)    # 残基级注释</code></pre>
+
+<p class="fix"><span class="badge b-info">关键细节</span> <b>ESM3 并不直接吐 3D 坐标。</b> 结构轨道走一个独立的 <b>VQ-VAE 结构 tokenizer</b>：结构 encoder 把 3D 坐标离散成<b>结构 token</b>；主干用 <code>structure_head</code> 预测 4096 路结构 token；再由一个<b>独立的 VQ-VAE decoder</b> 把结构 token 还原成 3D 坐标。所以「吃/吐结构」在主干层面是<b>离散 token</b>，坐标转换在 VQ-VAE 里。</p>
+<p class="src">证据：<code>RegressionHead</code> 定义在 <code>share/esm/esm/models/vqvae.py:98</code>；结构 token↔坐标的 VQ-VAE 也在 <code>vqvae.py</code>。</p>
+</div>
+
+<!-- ============ 分支 3 ============ -->
+<h2>③ Inverse Folding <span class="k">ESM-IF1</span></h2>
+<div class="card">
+<div class="you"><b>你的理解：</b>ESM-IF1(2022) 吃结构、吐序列。</div>
+<p class="fix"><span class="badge b-ok">✓ 正确</span> ESM-IF1 (Hsu et al., ICML 2022, <code>esm_if1_gvp4_t16_142M_UR50</code>)：结构 → 序列。<b>这一支才是真正的 encoder-decoder</b>：<b>GVP-GNN 几何编码器</b>（吃 backbone 坐标）+ <b>自回归 Transformer 解码器</b>（逐残基生成序列）。训练数据是 <b>~12M 条 AlphaFold2 预测结构</b>（这也是它能规模化的原因）。<span class="k">对标 ProteinMPNN 的正是这一支。</span></p>
+</div>
+
+<!-- ============ 分支 4 ============ -->
+<h2>④ 结构预测 <span class="k">ESMFold → ESMFold2</span></h2>
+<div class="card">
+<div class="you"><b>你的理解：</b>ESMFold(2023) 吃 ESM2 表征（ESM2 是否冻结？）、无 MSA、吐单体 atom-level 3D 坐标；ESMFold2(2026) 吃 ESM-C 表征（ESM-C 是否冻结？）、无 MSA、吐复合物 atom-level 3D 坐标（protein×protein、protein×ligand），且已超越 AlphaFold3。</div>
+
+<h3>ESMFold（v1, 2022/2023）</h3>
+<ul>
+<li><span class="badge b-ok">✓</span> 吃 ESM2 序列表征、无 MSA、输出 atom-level 单体结构 — 正确。</li>
+<li><span class="badge b-ok">✓ 你问的确认：ESM2 是<b>冻结</b>的。</span> ESMFold 训练时 <b>ESM2 权重冻结</b>，只在其表征上训练一个 folding trunk / structure module（AF2-Evoformer 精简版 + 结构模块）。这也是 ESMFold「快」的原因之一（不重训语言模型）。</li>
+</ul>
+
+<h3>ESMFold2（2026, EvolutionaryScale）</h3>
+<ul>
+<li><span class="badge b-ok">✓</span> <b>基于 ESM-C 表征</b> — 属实。原文：<span class="src">"ESMFold2 … processes ESMC's representations"（论文 L94）</span>。采用<b>looped（循环）架构</b>迭代精修。</li>
+<li><span class="badge b-ok">✓</span> <b>无 MSA</b> — 属实（<span class="src">"…without an MSA" L81</span>），纯从序列出结构。</li>
+<li><span class="badge b-ok">✓</span> <b>atom-level 复合物</b>，含 <b>protein×protein、antibody–antigen、protein×ligand</b> — 属实（<span class="src">L97 蛋白互作 / L449 ligand（LDDT-PLI）/ L485 抗体-抗原</span>）。</li>
+<li><span class="badge b-warn">⚠️ 「超越 AlphaFold3」要限定范围。</span> 不是全面碾压，而是<b>在特定复合物任务上、且是「从序列直接预测、无 MSA、快得多」的前提下</b>超越：<br>
+  · 抗体-抗原：ESMFold2 <b>54%±</b> vs AF3 <b>47%±</b>；蛋白-蛋白 <b>76%±</b> vs AF3 <b>73%±</b>（<span class="src">L477/485，surpassing AF3 in both</span>）；<br>
+  · 连精简版 <b>ESMFold2-Fast（24 层、~9.4s）</b> 都能在抗体-抗原上 50%± 超过 AF3、蛋白-蛋白上保持竞争力（<span class="src">L490-491,507</span>）。<br>
+  → 说「在生物分子<b>复合物</b>预测（尤其抗体-抗原）上、以无-MSA/高速的方式超越 AF3」更准确。</li>
+<li><span class="badge b-err">✗ 待确认项：ESM-C 是否冻结——论文没明说。</span> 我核到的文本只讲「ESMFold2 processes ESMC's representations」，<b>没有</b>明确「frozen / joint-train / fine-tune」。按 v1（冻结 ESM2）类比<b>很可能冻结</b>，但<b>我无法从现有论文文本坐实</b>——请勿当定论；要确认得查方法/附录或代码（<code>share/esm</code> 目前只有 ESMFold2 的<b>输入侧脚手架</b>，无模型本体，见 [esm-env memory]）。</li>
+</ul>
+</div>
+
+<!-- ============ 汇总表 ============ -->
+<h2>四分支汇总表（已校正）</h2>
+<table>
+<tr><th>分支</th><th>代表模型</th><th>吃什么 → 吐什么</th><th>架构范式</th><th>训练目标</th></tr>
+<tr><td>① 序列表征</td><td>ESM1→ESM2→ESM-C</td><td>seq → 表征 / seq</td><td><b>encoder-only</b> 双向主干 + 薄 LM head</td><td>MLM（掩码预测）</td></tr>
+<tr><td>② 多模态</td><td>ESM3</td><td>多轨(seq/struct/func/…) → 多轨</td><td>双向多轨主干 + 6 个薄 head（结构走 VQ-VAE）</td><td>全模态互相掩码预测</td></tr>
+<tr><td>③ inverse folding</td><td>ESM-IF1</td><td>结构 → 序列</td><td><b>真 encoder-decoder</b>：GVP 编码器 + 自回归解码器</td><td>自回归序列生成</td></tr>
+<tr><td>④ 结构预测</td><td>ESMFold→ESMFold2</td><td>seq → 3D 坐标（v2 含复合物/ligand）</td><td><b>冻结</b>的 LM(ESM2/ESM-C) + folding trunk（v2 looped）</td><td>结构回归（无 MSA）</td></tr>
+</table>
+
+<!-- ============ Q2 ============ -->
+<h2>Q2：ESM-C / ESM3 的表征 decoder 是不是很简单？</h2>
+<div class="card">
+<p><span class="badge b-ok">是，非常简单。</span> 两者的输出「decoder」都是同一个 <code>RegressionHead</code>——一个 <b>2 层 MLP</b>：</p>
+<pre><code>share/esm/esm/models/vqvae.py:98  (class RegressionHead)
+  Linear(d, d) → GELU → LayerNorm → Linear(d, output_dim)</code></pre>
+<ul>
+<li><b>ESM-C</b>：就 <b>1 个</b> 这样的头（sequence，投到 64 词表）。</li>
+<li><b>ESM3</b>：<b>6 个</b> 这样的头（每条轨道一个，见上）。</li>
+<li>也就是说：<em class="hl">「智能」几乎全在深层双向 Transformer 主干里（几亿~几十亿参数），输出头只是把丰富的 per-residue 表征做一次薄投影。</em></li>
+</ul>
+<p><b>唯一的例外/细节：</b>ESM3 <b>结构轨道</b>的“完整解码”不止这个薄头——薄头只吐<b>结构 token 的 4096 路 logits</b>；把结构 token 真正还原成 <b>3D 坐标</b>的是一个<b>独立的 VQ-VAE decoder</b>（一个小 Transformer，比薄头重、但仍远小于主干）。所以：「表征→各轨 logits」的 decoder 极简；「结构 token→坐标」的 decoder 才稍微“重”一点。</p>
+
+<div class="note">
+<b>为什么这跟我们的实验相关：</b>我们把 ProteinMPNN 换成「<b>ESM3（冻结）+ LoRA + stability head</b>」时，那个 stability head（<code>Linear(1536,1536)→LayerNorm→ReLU→Linear(1536,1)</code>）<b>正是这种「薄头贴在丰富表征上」的范式</b>——几乎就是 ESM3 自带 <code>RegressionHead</code> 的同构翻版。这也解释了为什么 Stage-1（folding ΔΔG）学得动：薄头足以从冻结主干的表征里线性读出稳定性信号。而 Stage-2（binding ΔΔG）学不动，问题不在“头太简单”，而在“binding 的差-之-差信号被残基求和稀释”（详见实验记录 md）。
+</div>
+</div>
+
+<h2 style="border:none;margin-top:40px;font-size:.95rem;color:var(--mut)">证据来源</h2>
+<p class="src">
+· 代码：<code>/home/guoj0f/share/esm/esm/</code>（官方 evolutionaryscale/esm 3.3.0, commit cf002f1）：<code>models/esm3.py</code>、<code>models/esmc.py</code>、<code>models/vqvae.py</code>。<br>
+· 论文：ESMFold2 = "Language Modeling Materializes a World Model of Protein Biology"（EvolutionaryScale, bioRxiv 2026），行号引自本地 pdftotext 抽取。<br>
+· 其余（ESM1/2/ESM-IF1/ESMFold v1 冻结 ESM2）为该领域公认结论。<b>唯一未坐实项：ESMFold2 是否冻结 ESM-C（论文未明说）。</b>
+</p>
+
+</body>
+</html>
