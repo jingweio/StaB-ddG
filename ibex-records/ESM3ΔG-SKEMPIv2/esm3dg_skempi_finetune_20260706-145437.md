@@ -59,6 +59,9 @@
   - **训练日志**:`ft_cbmask_{base,aug}_lr%a_20260706-145437.{out,err}`(%a=lr 索引:0→1e-6,1→5e-6,2→1e-5,3→5e-5,4→1e-4;每 job 首行 echo `WEIGHTSET=... lr=...`)。
   - **adapter ckpt**:`cache/esm3dg_skempi_cbmask_{base,aug}_lr{值}[_ep{10,20,30,40}].pt`;final(ep50)= `..._lr{值}.pt`。
   - **eval 结果 CSV(事后)**:`results/eval_skempi_cbmask_{base,aug}_lr{值}_ep{N}.csv`。
+- **【评测口径两级(用户 2026-07-07 定)】**:
+  - **本地 A4500 快评** = 仅 **sanity-check**(验证流程没出大问题 / 盯趋势挑候选 best-ep),结果只落 scratchpad,**不作正式结果、不进 `results/`**。
+  - **formal-evaluation 一律在 Ibex a100 上跑**(与训练同型号 GPU,整条 pipeline 一致):对每个 config 的 **best-ep + ep50** 两个 ckpt,用 `eval_skempi_finetuned.py`(chainbreak+mask_pipe,全 test)→ CSV 落 `results/`(留证)→ `skempi_metrics.py` THRESHOLD=10 → commit。正式结果表按 {base,aug} × {best-ep, ep50} 报,对标 StaB 0.448/0.531。
 
 ## 7. 指标口径(统一)
 - **per-structure Spearman THRESHOLD=10**(≥10 突变复合物均值,StaB baseline 0.448 口径)+ overall Spearman/Pearson(无阈值),用 `esm3dg_stab/skempi_metrics.py`。对标 **ProteinMPNN 0.448 / 0.531**。见 memory [[stabddg-per-interface-threshold10]]。
