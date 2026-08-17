@@ -1,0 +1,48 @@
+{
+  "n_rows": 4541,
+  "chain_count_distribution": {
+    "1": 3818,
+    "2": 708,
+    "3": 5,
+    "4": 9,
+    "6": 1
+  },
+  "n_multichain": 723,
+  "side_counts": {
+    "B2": 2566,
+    "B1": 1438,
+    "B1B2": 537
+  },
+  "n_cross_interface": 537,
+  "n_multichain_within_one_binder": 186,
+  "n_unknown_chain_rows": 0,
+  "split_stats": {
+    "train": {
+      "rows": 3050,
+      "multichain": 351,
+      "cross": 215,
+      "multichain_pct": 11.51,
+      "cross_pct": 7.05
+    },
+    "test": {
+      "rows": 1491,
+      "multichain": 372,
+      "cross": 322,
+      "multichain_pct": 24.95,
+      "cross_pct": 21.6
+    }
+  },
+  "cross_interface_complexes": 34,
+  "cross_interface_top_complexes": {
+    "1JTG_A_B": 109,
+    "1KBH_A_B": 73,
+    "3S9D_A_B": 59,
+    "1BRS_A_D": 43,
+    "4G0N_A_B": 33,
+    "1AO7_ABC_DE": 26,
+    "1LFD_A_B": 24,
+    "2VN5_A_B": 18,
+    "5XCO_A_B": 18,
+    "3HFM_HL_Y": 16
+  }
+}

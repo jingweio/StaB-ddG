@@ -151,7 +151,8 @@ reproduce/
 │   # —— 专题子目录 ——
 ├── mutation-analysis/               # mutation-cliff 分析:脚本 + 图(png)+ results.json + md
 ├── dG-ddG-sign-note/                # dG/ddG 符号约定梳理与验证(dG-ddG-sign-conventions.md)
-└── sidechain-usage-note/            # 结构输入是否含/用 side-chain 的梳理(sidechain-usage.md)
+├── sidechain-usage-note/            # 结构输入是否含/用 side-chain 的梳理(sidechain-usage.md)
+└── multichain-mutation-note/        # 多链/跨界面同时突变的规模与代码处理:脚本 + results.json + md
 ```
 
 > 注:上面这些脚本假设**从 repo 根目录运行**(如 `python reproduce/compute_metrics.py ...`);
